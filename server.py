@@ -17,16 +17,10 @@ def test():
     while True:
         conn, addr = s.accept()
         data = conn.recv(REQ_BUFFSIZE)
-        if not data:break
-        aa =  data.split("\n",1)[0].split()
-        http_response = b"""\
-HTTP/1.1 200 OK
-
-Hello, World!
-"""
+        http_response = b"HTTP/1.1 200 OK\r\n\r\nHello, World!\r\n"
         conn.sendall(http_response)
         conn.close()
 
 if __name__ == "__main__":
     test()
-    print "yes"
+    print "Bye"
