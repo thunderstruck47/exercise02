@@ -18,7 +18,9 @@ def test():
     while True:
         conn, addr = s.accept()
         data = conn.recv(REQ_BUFFSIZE)
-        http_response = b"HTTP/1.1 200 OK\r\n\r\nHello, World!\r\n"
+        http_response = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
+        with open(BASE_DIR + "/index.html") as f:
+            http_response += f.read() + "\r\n"
         conn.sendall(http_response)
         conn.close()
 
