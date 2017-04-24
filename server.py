@@ -7,6 +7,7 @@ import os
 HOST = ""
 PORT = 80
 REQ_BUFFSIZE = 4096
+BASE_DIR = "www"
 
 def test():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
