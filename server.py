@@ -1,9 +1,10 @@
-__version__ = "0.0.0"
+__version__ = "0.0.1"
 
 import socket
 import os
 import magic
 import mimetypes
+import datetime
 
 # The following need to be set in server.conf
 HOST = ""
@@ -51,9 +52,9 @@ def get_body(filepath):
         return http_body
 
 def get_head(filepath):
-    http_header = "HTTP/1.1 200 OK\r\nContent-Type: "
-    http_header += get_file_type(filepath)
-    http_header += "\r\n\r\n"
+    http_header = "HTTP/1.1 200 OK\r\nServer: {0}\r\n".format("Bistro " + __version__)
+    http_header += "Date: {0}\r\n".format(httpdate(datetime.datetime.utcnow()))
+    http_header += "Content-Type: {0}\r\n\r\n".format(get_file_type(filepath))
     return http_header
 
 def get_file_type(filepath):
@@ -63,11 +64,24 @@ def get_file_type(filepath):
         ext = ext.lower()
         if ext in extensions_map:
             return extensions_map[ext]
-        if ext == '':
-            return extensions_map['']
+        if ext == "":
+            return extensions_map[""]
         # Use libmagic if unknown type
         else:
             return magic.from_file(filepath, mime=True)
+
+def httpdate(dt):
+    """Return a string representation of a date according to RFC 1123
+    (HTTP/1.1).
+
+    The supplied date must be in UTC.
+
+    """
+    weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
+    month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+             "Oct", "Nov", "Dec"][dt.month - 1]
+    return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
+        dt.year, dt.hour, dt.minute, dt.second)
 
 # Populate MIME types dictionary
 if not mimetypes.inited: mimetypes.init() # try to read system mime.types
