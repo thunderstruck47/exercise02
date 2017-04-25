@@ -2,6 +2,8 @@ __version__ = "0.0.0"
 
 import socket
 import os
+import magic
+import mimetypes
 
 # The following need to be set in server.conf
 HOST = ""
@@ -22,28 +24,60 @@ def test():
     while True:
         conn, addr = s.accept()
         http_request = conn.recv(REQ_BUFFSIZE)
-        http_path = http_request.split("\n",1)[0].split()[1]
-        # Add HTTP Header
+        if not http_request:
+            print "Not a request"
+            conn.close()
+            continue
+        else: http_path = http_request.split("\n",1)[0].split()[1]
+        # Default not found
         http_response = HTTP_404
-        # Append HTTP Body
+        # Find file
         path = BASE_DIR + http_path
-        if os.path.exists(path):
-            if os.path.isdir(path):
-                if os.path.isfile(path + INDEX_FILE):
-                    http_response = get_body(path + INDEX_FILE)
-                else:
-                    http_response = HTTP_403
-            elif os.path.isfile(path):
-                    http_response = get_body(path)
+        if os.path.isdir(path):
+            if os.path.isfile(path + INDEX_FILE):
+                http_response = get_head(path + INDEX_FILE) + get_body(path + INDEX_FILE)
+            else:
+                http_response = HTTP_403
+        elif os.path.isfile(path):
+                http_response = get_head(path) + get_body(path)
         # Send response
         conn.sendall(http_response)
         conn.close()
 
 def get_body(filepath):
     with open(filepath) as f:
-        http_response = HTTP_200 + f.read() + "\r\n"
+        http_body = f.read() + "\r\n"
         f.close()
-    return http_response
+        return http_body
+
+def get_head(filepath):
+    http_header = "HTTP/1.1 200 OK\r\nContent-Type: "
+    http_header += get_file_type(filepath)
+    http_header += "\r\n\r\n"
+    return http_header
+
+def get_file_type(filepath):
+        name, ext = os.path.splitext(filepath)
+        if ext in extensions_map:
+            return extensions_map[ext]
+        ext = ext.lower()
+        if ext in extensions_map:
+            return extensions_map[ext]
+        if ext == '':
+            return extensions_map['']
+        # Use libmagic if unknown type
+        else:
+            return magic.from_file(filepath, mime=True)
+
+# Populate MIME types dictionary
+if not mimetypes.inited: mimetypes.init() # try to read system mime.types
+extensions_map = mimetypes.types_map.copy()
+extensions_map.update({
+        '': 'application/octet-stream', # Default
+        '.py': 'text/plain',
+        '.c': 'text/plain',
+        '.h': 'text/plain',
+        })
 
 if __name__ == "__main__":
     test()
