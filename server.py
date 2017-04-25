@@ -1,35 +1,84 @@
 __version__ = "0.0.1"
 
 import socket
+import asyncore
 import os
 import magic
 import mimetypes
 import datetime
+import time
 
 # The following need to be set in server.conf
 HOST = ""
 PORT = 80
-REQ_BUFFSIZE = 4096
+REQ_BUFFSIZE = 8192
 BASE_DIR = "www"
 INDEX_FILE = "index.html"
 HTTP_200 = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
 HTTP_404 = b"HTTP/1.1 404 Not Found\r\n\r\n"
 HTTP_403 = b"HTTP/1.1 403 Forbidden\r\n\r\n"
 
-def test():
+class HttpHandler(asyncore.dispatcher_with_send):
+
+    def handle_read(self):
+        http_request = self.recv(REQ_BUFFSIZE)
+        if http_request:
+            print http_request
+            http_path = http_request.split("\n",1)[0].split()[1]
+            # Default not found
+            http_response = HTTP_404
+            # Find file
+            path = BASE_DIR + http_path
+            if os.path.isdir(path):
+                if os.path.isfile(path + INDEX_FILE):
+                    http_response = get_head(path + INDEX_FILE) + get_body(path + INDEX_FILE)
+                else:
+                    http_response = HTTP_403
+            elif os.path.isfile(path):
+                    http_response = get_head(path) + get_body(path)
+            # Send response
+            self.send(http_response)
+
+
+class AsyncServer(asyncore.dispatcher):
+
+    def __init__(self,HOST, PORT):
+        asyncore.dispatcher.__init__(self)
+        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.set_reuse_addr()
+        self.bind((HOST, PORT))
+        self.listen(1024)
+
+    def handle_accept(self):
+        pair = self.accept()
+        if pair is not None:
+            conn, addr = pair
+            handler = HttpHandler(conn)
+
+def serve():
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     s.bind((HOST,PORT))
     s.listen(1)
     print "* Serving at http://127.0.0.1:{0}/ (Press CTRL+C to quit)".format(PORT)
+    print('Serving HTTP on port {port} ...'.format(port=PORT))
+    print('Parent PID (PPID): {pid}\n'.format(pid=os.getpid()))
+
     while True:
         conn, addr = s.accept()
-        http_request = conn.recv(REQ_BUFFSIZE)
-        if not http_request:
-            print "Not a request"
+        pid = os.fork()
+        if pid == 0: # child
+            s.close() # close child copy
+            handle_request(conn)
             conn.close()
-            continue
-        else: http_path = http_request.split("\n",1)[0].split()[1]
+            os._exit(0) # child exits here
+        else: # parent
+            conn.close()
+
+def handle_request(conn):
+    http_request = conn.recv(REQ_BUFFSIZE)
+    if http_request:
+        http_path = http_request.split("\n",1)[0].split()[1]
         # Default not found
         http_response = HTTP_404
         # Find file
@@ -43,7 +92,9 @@ def test():
                 http_response = get_head(path) + get_body(path)
         # Send response
         conn.sendall(http_response)
-        conn.close()
+        time.sleep(5)
+
+
 
 def get_body(filepath):
     with open(filepath) as f:
@@ -52,9 +103,10 @@ def get_body(filepath):
         return http_body
 
 def get_head(filepath):
-    http_header = "HTTP/1.1 200 OK\r\nServer: {0}\r\n".format("Bistro " + __version__)
+    http_header = "HTTP/1.0 200 OK\r\n" # Response Code
+    http_header += "Content-Type: {0}\r\n".format(get_file_type(filepath))
     http_header += "Date: {0}\r\n".format(httpdate(datetime.datetime.utcnow()))
-    http_header += "Content-Type: {0}\r\n\r\n".format(get_file_type(filepath))
+    http_header += "Server: {0}\r\n\r\n".format("Bistro/" + __version__)
     return http_header
 
 def get_file_type(filepath):
@@ -94,5 +146,9 @@ extensions_map.update({
         })
 
 if __name__ == "__main__":
-    test()
+    # Experimental:
+    #server = AsyncServer('localhost',80)
+    #asyncore.loop()
+
+    serve()
     print "Bye"
