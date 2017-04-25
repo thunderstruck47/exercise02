@@ -8,7 +8,7 @@ HOST = ""
 PORT = 80
 REQ_BUFFSIZE = 4096
 BASE_DIR = "www"
-INDEX_FILE = "\index.html"
+INDEX_FILE = "index.html"
 HTTP_200 = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
 HTTP_404 = b"HTTP/1.1 404 Not Found\r\n\r\n"
 HTTP_403 = b"HTTP/1.1 403 Forbidden\r\n\r\n"
@@ -30,7 +30,7 @@ def test():
         if os.path.exists(path):
             if os.path.isdir(path):
                 if os.path.isfile(path + INDEX_FILE):
-                    http_response = get_body(filepath)
+                    http_response = get_body(path + INDEX_FILE)
                 else:
                     http_response = HTTP_403
             elif os.path.isfile(path):
