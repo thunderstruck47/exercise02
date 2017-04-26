@@ -19,6 +19,8 @@ class HttpHandler():
 
     __version__ = "1.0" # HTTP version
     line_terminator = "\r\n" # Unused
+    index_files = ["index.html", "index.htm"]
+    supported_methods = ["GET", "HEAD", "POST"]
     responses = {
         200: "OK",
         403: "Forbidden",
@@ -37,22 +39,26 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self, conn, addr, logging = True):
-        self.conn = conn
-        self.addr = addr
+    def __init__(self, logging = True):
         self.logging = logging
-        self.conn.settimeout(None)
-        self.rfile = conn.makefile('rb', -1)
-        self.wfile = conn.makefile('wb', 0)
 
-    def handle_request(self):
+    def handle_request(self, conn, addr):
         try:
+            self.conn = conn
+            self.addr = addr
+            self.conn.settimeout(None)
+            self.rfile = conn.makefile('rb', -1)
+            self.wfile = conn.makefile('wb', 0)
+
             request =  self.rfile.readline(REQ_BUFFSIZE) # Ignore headers for now
             if request:
                 method, path, version = request.split()
-                path = self.handle_path(path)
-                if path: # File was found
-                    self.handle_method(method, path)
+                if method not in self.supported_methods: # Check method before path
+                    self.write_code(501)
+                else:
+                    path = self.handle_path(path)
+                    if path: # File was found
+                        self.handle_method(method, path)
 
         except:
             self.write_code(500) # Internal server error
@@ -60,8 +66,8 @@ class HttpHandler():
 
         finally:
             # Logging
-            if self.logging: print("{0} - - [{1}] \"{2}\" {3} -".format(self.addr[0], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
-
+            if self.logging and request: print("{0} - - [{1}] \"{2}\" {3} -".format(self.addr[0], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
+            if not request: print "emptry request"
             # Finalize files
             self.wfile.flush()
             self.rfile.close()
@@ -69,22 +75,16 @@ class HttpHandler():
             self.conn.close()
 
     def handle_method(self, method, path):
-        if method == "GET":
-            self.write_code(200)
+        self.write_code(200)
+        if method == "GET" or method == "POST":
             self.write_head(path)
             self.write_body(path)
         elif method =="HEAD":
-            self.write_code(200)
             self.write_head(path)
-        elif method =="POST":
-            # Works the same as GET
-            self.write_code(200)
-            self.write_head(path)
-            self.write_body(path)
-        else: self.write_code(501)
 
     def write_head(self, path):
         size, mtime = self.get_file_info(path)
+        self.wfile.write("Connection: close\r\n") # HTTP 1.0
         self.wfile.write("Content-Length: {0}\r\n".format(size))
         self.wfile.write("Last-Modified: {0}\r\n".format(self.httpdate(datetime.datetime.fromtimestamp(mtime))))
         self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)))
@@ -111,7 +111,7 @@ class HttpHandler():
         path = path.split("#",1)[0]
         path = BASE_DIR + path
         if os.path.isdir(path):
-            for index in "index.html", "index.htm":
+            for index in self.index_files:
                 index = os.path.join(path, index)
                 if os.path.isfile(index):
                     path = index
@@ -167,6 +167,7 @@ class ForkingServer():
     def __init__(self, HOST, PORT):
         self.PORT = PORT
         self.HOST = HOST
+        self.handler = HttpHandler()
 
     def configure(self):
         pass
@@ -190,8 +191,7 @@ class ForkingServer():
                     conn.close()
                 else: # Child
                     self.socket.close()
-                    handler = HttpHandler(conn, addr)
-                    handler.handle_request()
+                    self.handler.handle_request(conn, addr)
                     os._exit(0)
 
 if __name__ == "__main__":
