@@ -84,6 +84,9 @@ class HttpHandler():
         else: self.write_code(501)
 
     def write_head(self, path):
+        size, mtime = self.get_file_info(path)
+        self.wfile.write("Content-Length: {0}\r\n".format(size))
+        self.wfile.write("Last-Modified: {0}\r\n".format(self.httpdate(datetime.datetime.fromtimestamp(mtime))))
         self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)))
         self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())))
         self.wfile.write("Server: {0}\r\n\r\n".format("Bistro/" + __version__))
@@ -124,6 +127,14 @@ class HttpHandler():
             return path
         # Not found
         self.write_code(404)
+
+    def get_file_info(self, filepath):
+        f = open(filepath,'rb')
+        fs = os.fstat(f.fileno())
+        size = fs.st_size
+        mtime = fs.st_mtime
+        f.close()
+        return size, mtime
 
     def get_file_type(self, filepath):
         name, ext = os.path.splitext(filepath)
