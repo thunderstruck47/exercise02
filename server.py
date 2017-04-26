@@ -37,8 +37,10 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self,conn):
+    def __init__(self, conn, addr, logging = True):
         self.conn = conn
+        self.addr = addr
+        self.logging = logging
         self.conn.settimeout(None)
         self.rfile = conn.makefile('rb', -1)
         self.wfile = conn.makefile('wb', 0)
@@ -51,10 +53,16 @@ class HttpHandler():
                 path = self.handle_path(path)
                 if path: # File was found
                     self.handle_method(method, path)
+
         except:
-            self.write_code(500)
+            self.write_code(500) # Internal server error
             raise
+
         finally:
+            # Logging
+            if self.logging: print("{0} - - [{1}] \"{2}\" {3} -".format(self.addr[0], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
+
+            # Finalize files
             self.wfile.flush()
             self.rfile.close()
             self.wfile.close()
@@ -88,8 +96,10 @@ class HttpHandler():
     def write_code(self, code):
         try:
             self.wfile.write("HTTP/{0} {1} {2}\r\n".format(self.__version__, code, self.responses[code]))
+            self.code = code
         except:
             self.write_code(500)
+            self.code = 500
             raise
 
     def handle_path(self, path):
@@ -169,7 +179,7 @@ class ForkingServer():
                     conn.close()
                 else: # Child
                     self.socket.close()
-                    handler = HttpHandler(conn)
+                    handler = HttpHandler(conn, addr)
                     handler.handle_request()
                     os._exit(0)
 
