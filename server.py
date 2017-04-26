@@ -50,10 +50,7 @@ class HttpHandler():
                 method, path, version = request.split()
                 path = self.handle_path(path)
                 if path: # File was found
-                    self.write_code(200)
                     self.handle_method(method, path)
-                else:
-                    self.write_code(404)
         except:
             self.write_code(500)
             raise
@@ -65,12 +62,15 @@ class HttpHandler():
 
     def handle_method(self, method, path):
         if method == "GET":
+            self.write_code(200)
             self.write_head(path)
             self.write_body(path)
         elif method =="HEAD":
+            self.write_code(200)
             self.write_head(path)
         elif method =="POST":
             # Works the same as GET
+            self.write_code(200)
             self.write_head(path)
             self.write_body(path)
         else: self.write_code(501)
@@ -86,10 +86,11 @@ class HttpHandler():
         f.close()
 
     def write_code(self, code):
-        if code in self.responses:
+        try:
             self.wfile.write("HTTP/{0} {1} {2}\r\n".format(self.__version__, code, self.responses[code]))
-        else:
+        except:
             self.write_code(500)
+            raise
 
     def handle_path(self, path):
         # Lose parameters
@@ -103,13 +104,16 @@ class HttpHandler():
                     path = index
                     break
             else:
-                self.write_error("403")
+                # Is a dir
+                self.write_code(403)
                 return
         if os.path.isfile(path):
             return path
         path = path.rstrip("/")
         if os.path.isfile(path):
             return path
+        # Not found
+        self.write_code(404)
 
     def get_file_type(self, filepath):
         name, ext = os.path.splitext(filepath)
