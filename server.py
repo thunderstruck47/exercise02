@@ -8,18 +8,11 @@ import mimetypes
 import datetime
 import time
 import shutil
-
-# The following need to be set in server.conf
-HOST = ""
-PORT = 80
-REQ_BUFFSIZE = 8192
-BASE_DIR = "www"
+import ConfigParser
 
 class HttpHandler():
 
-    __version__ = "1.0" # HTTP version
-    line_terminator = "\r\n" # Unused
-    index_files = ["index.html", "index.htm"]
+    version = "1.0" # HTTP version
     supported_methods = ["GET", "HEAD", "POST"]
     responses = {
         200: "OK",
@@ -39,8 +32,12 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self, logging = True):
-        self.logging = logging
+    def __init__(self, HTTP_VERSION = None, INDEX_FILES = ["index.htm", "index.html"], REQ_BUFFSIZE = 8192, PUBLIC_DIR = "www", LOGGING = True):
+        # Not using version for now
+        self.INDEX_FILES = INDEX_FILES
+        self.REQ_BUFFSIZE = REQ_BUFFSIZE
+        self.PUBLIC_DIR = PUBLIC_DIR
+        self.LOGGING = LOGGING
 
     def handle_request(self, conn, addr):
         try:
@@ -50,7 +47,7 @@ class HttpHandler():
             self.rfile = conn.makefile('rb', -1)
             self.wfile = conn.makefile('wb', 0)
 
-            request =  self.rfile.readline(REQ_BUFFSIZE) # Ignore headers for now
+            request =  self.rfile.readline(self.REQ_BUFFSIZE) # Ignore headers for now
             if request:
                 method, path, version = request.split()
                 if method not in self.supported_methods: # Check method before path
@@ -66,7 +63,7 @@ class HttpHandler():
 
         finally:
             # Logging
-            if self.logging and request: print("{0} - - [{1}] \"{2}\" {3} -".format(self.addr[0], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
+            if self.LOGGING and request: print("{0} - - [{1}] \"{2}\" {3} -".format(self.addr[0], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
             if not request: print "emptry request"
             # Finalize files
             self.wfile.flush()
@@ -98,7 +95,7 @@ class HttpHandler():
 
     def write_code(self, code):
         try:
-            self.wfile.write("HTTP/{0} {1} {2}\r\n".format(self.__version__, code, self.responses[code]))
+            self.wfile.write("HTTP/{0} {1} {2}\r\n".format(self.version, code, self.responses[code]))
             self.code = code
         except:
             self.write_code(500)
@@ -109,9 +106,9 @@ class HttpHandler():
         # Lose parameters
         path = path.split("?",1)[0]
         path = path.split("#",1)[0]
-        path = BASE_DIR + path
+        path = self.PUBLIC_DIR + path
         if os.path.isdir(path):
-            for index in self.index_files:
+            for index in self.INDEX_FILES:
                 index = os.path.join(path, index)
                 if os.path.isfile(index):
                     path = index
@@ -164,13 +161,56 @@ class HttpHandler():
 
 class ForkingServer():
 
-    def __init__(self, HOST, PORT):
-        self.PORT = PORT
-        self.HOST = HOST
-        self.handler = HttpHandler()
+    def __init__(self, config_filename = "server.conf"):
 
-    def configure(self):
-        pass
+        # Reading settings from config file
+        # If setting is missing, replace with default
+        try:
+            with open(config_filename,"rb") as f:
+                config = ConfigParser.ConfigParser()
+                config.readfp(f)
+                try:
+                    self.HOST = config.get("server","host")
+                except:
+                    self.HOST = ""
+                try:
+                    self.PORT = config.getint("server","port")
+                except:
+                    self.PORT = 8000
+                try:
+                    self.REQ_BUFFSIZE = config.getint("server","request_buffsize")
+                except:
+                    self.REQ_BUFFSIZE = 4096
+                try:
+                    self.PUBLIC_DIR = config.get("server","public_dir")
+                except:
+                    self.PUBLIC_DIR = "www"
+                try:
+                    self.HTTP_VERSION = config.get("server","http_version")
+                except:
+                    self.HTTP_VERSION = 1.0
+                try:
+                    self.INDEX_FILES = config.get("server","index_files").split()
+                except:
+                    self.INDEX_FILES = ["index.html","index.htm"]
+                try:
+                    self.LOGGING = config.getboolean("server","logging")
+                except:
+                    self.LOGGING = True
+                try:
+                    self.LOG_FILE = config.get("server","log_file")
+                except:
+                    self.LOG_FILE = "server.log"
+
+                f.close()
+                # Setting up the HTTP handler
+                self.handler = HttpHandler(self.HTTP_VERSION, self.INDEX_FILES, self.REQ_BUFFSIZE, self.PUBLIC_DIR)
+
+        except IOError:
+            # Should create a new config file
+            print "Missing configuration file"
+            print "Assuming default settings"
+            self.handler = HttpHandler()
 
     def setup(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -195,6 +235,6 @@ class ForkingServer():
                     os._exit(0)
 
 if __name__ == "__main__":
-    server = ForkingServer(HOST,PORT)
+    server = ForkingServer()
     server.serve_forever()
     print "Bye"
