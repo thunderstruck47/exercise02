@@ -7,148 +7,169 @@ import magic
 import mimetypes
 import datetime
 import time
+import shutil
 
 # The following need to be set in server.conf
 HOST = ""
 PORT = 80
 REQ_BUFFSIZE = 8192
 BASE_DIR = "www"
-INDEX_FILE = "index.html"
-HTTP_200 = b"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n"
-HTTP_404 = b"HTTP/1.1 404 Not Found\r\n\r\n"
-HTTP_403 = b"HTTP/1.1 403 Forbidden\r\n\r\n"
 
-class HttpHandler(asyncore.dispatcher_with_send):
+class HttpHandler():
 
-    def handle_read(self):
-        http_request = self.recv(REQ_BUFFSIZE)
-        if http_request:
-            print http_request
-            http_path = http_request.split("\n",1)[0].split()[1]
-            # Default not found
-            http_response = HTTP_404
-            # Find file
-            path = BASE_DIR + http_path
-            if os.path.isdir(path):
-                if os.path.isfile(path + INDEX_FILE):
-                    http_response = get_head(path + INDEX_FILE) + get_body(path + INDEX_FILE)
-                else:
-                    http_response = HTTP_403
-            elif os.path.isfile(path):
-                    http_response = get_head(path) + get_body(path)
-            # Send response
-            self.send(http_response)
-
-
-class AsyncServer(asyncore.dispatcher):
-
-    def __init__(self,HOST, PORT):
-        asyncore.dispatcher.__init__(self)
-        self.create_socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.set_reuse_addr()
-        self.bind((HOST, PORT))
-        self.listen(1024)
-
-    def handle_accept(self):
-        pair = self.accept()
-        if pair is not None:
-            conn, addr = pair
-            handler = HttpHandler(conn)
-
-def serve():
-    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST,PORT))
-    s.listen(1)
-    print "* Serving at http://127.0.0.1:{0}/ (Press CTRL+C to quit)".format(PORT)
-    print('Serving HTTP on port {port} ...'.format(port=PORT))
-    print('Parent PID (PPID): {pid}\n'.format(pid=os.getpid()))
-
-    while True:
-        conn, addr = s.accept()
-        pid = os.fork()
-        if pid == 0: # child
-            s.close() # close child copy
-            handle_request(conn)
-            conn.close()
-            os._exit(0) # child exits here
-        else: # parent
-            conn.close()
-
-def handle_request(conn):
-    http_request = conn.recv(REQ_BUFFSIZE)
-    if http_request:
-        http_path = http_request.split("\n",1)[0].split()[1]
-        # Default not found
-        http_response = HTTP_404
-        # Find file
-        path = BASE_DIR + http_path
-        if os.path.isdir(path):
-            if os.path.isfile(path + INDEX_FILE):
-                http_response = get_head(path + INDEX_FILE) + get_body(path + INDEX_FILE)
-            else:
-                http_response = HTTP_403
-        elif os.path.isfile(path):
-                http_response = get_head(path) + get_body(path)
-        # Send response
-        conn.sendall(http_response)
-        time.sleep(5)
-
-
-
-def get_body(filepath):
-    with open(filepath) as f:
-        http_body = f.read() + "\r\n"
-        f.close()
-        return http_body
-
-def get_head(filepath):
-    http_header = "HTTP/1.0 200 OK\r\n" # Response Code
-    http_header += "Content-Type: {0}\r\n".format(get_file_type(filepath))
-    http_header += "Date: {0}\r\n".format(httpdate(datetime.datetime.utcnow()))
-    http_header += "Server: {0}\r\n\r\n".format("Bistro/" + __version__)
-    return http_header
-
-def get_file_type(filepath):
-        name, ext = os.path.splitext(filepath)
-        if ext in extensions_map:
-            return extensions_map[ext]
-        ext = ext.lower()
-        if ext in extensions_map:
-            return extensions_map[ext]
-        if ext == "":
-            return extensions_map[""]
-        # Use libmagic if unknown type
-        else:
-            return magic.from_file(filepath, mime=True)
-
-def httpdate(dt):
-    """Return a string representation of a date according to RFC 1123
-    (HTTP/1.1).
-
-    The supplied date must be in UTC.
-
-    """
-    weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
-    month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
-             "Oct", "Nov", "Dec"][dt.month - 1]
-    return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
-        dt.year, dt.hour, dt.minute, dt.second)
-
-# Populate MIME types dictionary
-if not mimetypes.inited: mimetypes.init() # try to read system mime.types
-extensions_map = mimetypes.types_map.copy()
-extensions_map.update({
+    __version__ = "1.0" # HTTP version
+    line_terminator = "\r\n" # Unused
+    responses = {
+        200: "OK",
+        403: "Forbidden",
+        404: "Not Found",
+        500: "Internal Server Error",
+        501: "Not Implemented",
+        505: "HTTP Version Not Supported"
+    }
+     # Populate MIME types dictionary
+    if not mimetypes.inited: mimetypes.init() # try to read system mime.types
+    extensions_map = mimetypes.types_map.copy()
+    extensions_map.update({
         '': 'application/octet-stream', # Default
         '.py': 'text/plain',
         '.c': 'text/plain',
         '.h': 'text/plain',
         })
 
-if __name__ == "__main__":
-    # Experimental:
-    #server = AsyncServer('localhost',80)
-    #asyncore.loop()
+    def __init__(self,conn):
+        self.conn = conn
+        self.conn.settimeout(None)
+        self.rfile = conn.makefile('rb', -1)
+        self.wfile = conn.makefile('wb', 0)
 
-    serve()
+    def handle_request(self):
+        try:
+            request =  self.rfile.readline(REQ_BUFFSIZE) # Ignore headers for now
+            if request:
+                method, path, version = request.split()
+                path = self.handle_path(path)
+                if path: # File was found
+                    self.write_code(200)
+                    self.handle_method(method, path)
+                else:
+                    self.write_code(404)
+        except:
+            self.write_code(500)
+            raise
+        finally:
+            self.wfile.flush()
+            self.rfile.close()
+            self.wfile.close()
+            self.conn.close()
+
+    def handle_method(self, method, path):
+        if method == "GET":
+            self.write_head(path)
+            self.write_body(path)
+        elif method =="HEAD":
+            self.write_head(path)
+        elif method =="POST":
+            # Works the same as GET
+            self.write_head(path)
+            self.write_body(path)
+        else: self.write_code(501)
+
+    def write_head(self, path):
+        self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)))
+        self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())))
+        self.wfile.write("Server: {0}\r\n\r\n".format("Bistro/" + __version__))
+
+    def write_body(self, path):
+        f = open(path, "r")
+        shutil.copyfileobj(f,self.wfile)
+        f.close()
+
+    def write_code(self, code):
+        if code in self.responses:
+            self.wfile.write("HTTP/{0} {1} {2}\r\n".format(self.__version__, code, self.responses[code]))
+        else:
+            self.write_code(500)
+
+    def handle_path(self, path):
+        # Lose parameters
+        path = path.split("?",1)[0]
+        path = path.split("#",1)[0]
+        path = BASE_DIR + path
+        if os.path.isdir(path):
+            for index in "index.html", "index.htm":
+                index = os.path.join(path, index)
+                if os.path.isfile(index):
+                    path = index
+                    break
+            else:
+                self.write_error("403")
+                return
+        if os.path.isfile(path):
+            return path
+        path = path.rstrip("/")
+        if os.path.isfile(path):
+            return path
+
+    def get_file_type(self, filepath):
+        name, ext = os.path.splitext(filepath)
+        if ext in self.extensions_map:
+            return self.extensions_map[ext]
+        ext = ext.lower()
+        if ext in self.extensions_map:
+            return self.extensions_map[ext]
+        if ext == "":
+            return self.extensions_map[""]
+        # Use libmagic if unknown type
+        else:
+            return magic.from_file(filepath, mime=True)
+
+    def httpdate(self, dt):
+        """Return a string representation of a date according to RFC 1123
+        (HTTP/1.1).
+
+        The supplied date must be in UTC.
+
+        """
+        weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
+        month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+                 "Oct", "Nov", "Dec"][dt.month - 1]
+        return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
+            dt.year, dt.hour, dt.minute, dt.second)
+
+class ForkingServer():
+
+    def __init__(self, HOST, PORT):
+        self.PORT = PORT
+        self.HOST = HOST
+
+    def configure(self):
+        pass
+
+    def setup(self):
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind((self.HOST, self.PORT))
+        self.socket.listen(5)
+
+    def serve_forever(self):
+        self.setup()
+        print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
+
+        while True:
+            pair = self.socket.accept()
+            if pair: # Not None
+                conn, addr = pair
+                pid = os.fork()
+                if pid: # Parent
+                    conn.close()
+                else: # Child
+                    self.socket.close()
+                    handler = HttpHandler(conn)
+                    handler.handle_request()
+                    os._exit(0)
+
+if __name__ == "__main__":
+    server = ForkingServer(HOST,PORT)
+    server.serve_forever()
     print "Bye"
