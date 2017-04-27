@@ -4,18 +4,18 @@ A very simple HTTP static file server
 
 ### Dependencies
 
-Currently works with a Python 2.7 interpreter with Python 3 version on it's way..
+Currently works with a Python 2.7 interpreter, with Python 3 version on it's way..
 
 Requires [python-magic](https://github.com/ahupp/python-magic) community module for file type identification (based on libmagic) (should be optional)
 
 ### Features
 
-* Basic configuration
-* Serves static files
-* Persistent, non persistent and single connections
+* Speaks (partially) HTTP/0.9, HTTP/1.0 and HTTP/1.1
+* Supports GET, HEAD and POST(ignores parameters) for HTTP/1.0 and HTTP/1.1
+* Servers static files only (no WSGI)
+* Basic server configuration via configuration file
+* Handles persistent, non persistent and single connections
 * Handles concurrent requests via forking
-* Supports HTTP GET, HEAD and POST(works the same as GET; parameters are ignored)
-* Speaks only HTTP/1.0 (for now)
 
 ### Configuration
 
@@ -33,7 +33,7 @@ index_files = index.html index.htm
 ### To do
 
 * ~~Handle defunct child processes~~
-* HTTP/1.1 and HTTP/0.9 support
+* ~~HTTP/1.1 and HTTP/0.9 support~~
 * Directory file listing page
 * Proper documentation
 * Proper logging

@@ -1,3 +1,4 @@
+#!/usr/bin/env python2
 __version__ = "0.0.1"
 
 # Standard modules
@@ -26,6 +27,7 @@ class HttpHandler():
     supported_methods = ["GET", "HEAD", "POST"]
     responses = {
         200: "OK",
+        400: "Bad Request",
         403: "Forbidden",
         404: "Not Found",
         500: "Internal Server Error",
@@ -42,15 +44,15 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    # Consider using __init__(self, conn, addr, server)
-    # to pass the server as an argument. No point in repeating configuration.
     def __init__(self, conn, addr, server):
         # Not using version for now
         self.conn = conn
         self.addr = addr
         self.server = server
+        self.server.headers = True
         self.handle_conn()
 
+    # Handles current connection
     def handle_conn(self):
         request = None
         self.code = None
@@ -59,22 +61,56 @@ class HttpHandler():
             self.rfile = self.conn.makefile('rb', -1)
             self.wfile = self.conn.makefile('wb', 0)
             try:
-                request = self.rfile.readline(self.server.REQ_BUFFSIZE) # Ignore headers for now
+                firstline = self.rfile.readline(self.server.REQ_BUFFSIZE) # Ignore headers for now
                 # write 414
-                if not request:
+                if not firstline:
                     self.server.close_connection = True
                     return
             except socket.timeout as e:
                 self.server.close_connection = True
                 raise
                 return
-            method, path, version = request.split()
-            if method not in self.supported_methods: # Check method before path
-                self.write_code(501)
+            request = firstline.split()
+            if len(request) == 3: # HTTP/1.0 AND HTTP/1.1
+                method, path, version = request
+                if version[:5] != "HTTP/":
+                    self.write_code(400)
+                try:
+                    version_number = version.split("/",1)[1].split(".")
+                    print version_number
+                    if len(version_number) != 2:
+                        raise ValueError
+                    version_number = int(version_number[0]), int(version_number[1])
+                    if version_number[0] < 1 or version_number[1] < 0:
+                        raise ValueError
+
+                except(ValueError, IndexError):
+                    self.server.close_connection = True
+                    self.write_code(400)
+                else:
+                    if version_number[0] > 1: # HTTP/2+
+                        self.write_code(505) # Not supported
+                    elif method not in self.supported_methods: # Valid method?
+                        self.write_code(501)
+                    else: # Proceeed
+                        if version_number == (1, 0):
+                            self.server.close_connection = True
+                            self.version = "1.0"
+                        elif version_number == (1, 1):
+                            self.server.close_connection = False
+                            self.version = "1.1"
+                        path = self.handle_path(path)
+                        if path: # File was found
+                            self.handle_method(method, path)
+            elif len(request) == 2:
+                method, path = request
+                if method == "GET":
+                    self.server.close_connection = True
+                    path = self.handle_path(path)
+                    self.write_body(path)
             else:
-                path = self.handle_path(path)
-                if path: # File was found
-                    self.handle_method(method, path)
+                self.server.close_connection = True
+                self.write_code(400)
 
         except:
             raise
@@ -82,12 +118,11 @@ class HttpHandler():
 
         finally:
             # Logging
-            if self.server.LOGGING and request: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
+            if self.server.LOGGING and request: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), firstline.strip("\r\n"), self.code))
             # Finalize files
             self.wfile.flush()
             self.rfile.close()
             self.wfile.close()
-            #self.conn.close()
 
     def handle_method(self, method, path):
         self.write_code(200)
@@ -99,8 +134,8 @@ class HttpHandler():
 
     def write_head(self, path):
         size, mtime = self.get_file_info(path)
-        #self.wfile.write("Connection: keep-alive\r\n") # HTTP 1.0
         self.wfile.write("Content-Length: {0}\r\n".format(size))
+        # if caching:
         #self.wfile.write("Last-Modified: {0}\r\n".format(self.httpdate(datetime.datetime.fromtimestamp(mtime))))
         self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)))
         self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())))
@@ -119,6 +154,7 @@ class HttpHandler():
             self.write_code(500)
             self.code = 500
             raise
+
         if self.server.close_connection: self.wfile.write("Connection: close\r\n")
         else: self.wfile.write("Connection: keep-alive\r\n") # HTTP 1.0
 
@@ -184,8 +220,6 @@ class HttpHandler():
             dt.year, dt.hour, dt.minute, dt.second)
 
 class ForkingServer():
-
-    close_connection = False
 
     def __init__(self, config_filename = "server.conf"):
 
