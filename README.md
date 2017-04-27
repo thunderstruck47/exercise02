@@ -4,7 +4,8 @@ A very simple HTTP static file server
 
 ### Dependencies
 
-Needs a Python 2.7 interpreter
+Currently works with a Python 2.7 interpreter with Python 3 version on it's way..
+Requires [python-magic](https://github.com/ahupp/python-magic) community module for file type identification (based on libmagic) (should be optional)
 
 ### Features
 
@@ -24,7 +25,7 @@ Example configuration file
 host = localhost
 port = 8000
 public_dir = www
-request_buffsize = 4096
+req_buffsize = 4096
 index_files = index.html index.htm
 ````
 

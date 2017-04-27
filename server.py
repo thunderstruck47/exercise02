@@ -1,9 +1,9 @@
 __version__ = "0.0.1"
 
+# Standard modules
 import socket
 import os
 import sys
-import magic
 import mimetypes
 import datetime
 import time
@@ -13,6 +13,10 @@ if sys.version_info > (3, 0):
     import configparser
 else:
     import ConfigParser
+
+# Community modules
+# Should be made optional
+import maigc
 
 class HttpHandler():
 
