@@ -13,7 +13,7 @@ Needs a Python 2.7 interpreter
 * Persistent, non persistent and single connections
 * Handles concurrent requests via forking
 * Supports HTTP GET, HEAD and POST(works the same as GET; parameters are ignored)
-* Currently supports HTTP/1.0
+* Currently speaks only HTTP/1.0
 
 ### Configuration
 
@@ -31,5 +31,6 @@ index_files = index.html index.htm
 ### To do
 
 * Handle ghost child processes
-* Implement HTTP/1.1
+* Implement HTTP/1.1 and HTTP/0.9 support
 * List directory page
+* Proper documentation
