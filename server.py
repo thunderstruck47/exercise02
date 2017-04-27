@@ -1,8 +1,8 @@
 __version__ = "0.0.1"
 
 import socket
-import asyncore
 import os
+import sys
 import magic
 import mimetypes
 import datetime
@@ -32,44 +32,52 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self, HTTP_VERSION = None, INDEX_FILES = ["index.htm", "index.html"], REQ_BUFFSIZE = 8192, PUBLIC_DIR = "www", LOGGING = True):
+    # Consider using __init__(self, conn, addr, server)
+    # to pass the server as an argument. No point in repeating configuration.
+    def __init__(self, conn, addr, server):
         # Not using version for now
-        self.INDEX_FILES = INDEX_FILES
-        self.REQ_BUFFSIZE = REQ_BUFFSIZE
-        self.PUBLIC_DIR = PUBLIC_DIR
-        self.LOGGING = LOGGING
+        self.conn = conn
+        self.addr = addr
+        self.server = server
+        self.handle_conn()
 
-    def handle_request(self, conn, addr):
+    def handle_conn(self):
+        request = None
+        self.code = None
         try:
-            self.conn = conn
-            self.addr = addr
             self.conn.settimeout(None)
-            self.rfile = conn.makefile('rb', -1)
-            self.wfile = conn.makefile('wb', 0)
-
-            request =  self.rfile.readline(self.REQ_BUFFSIZE) # Ignore headers for now
-            if request:
-                method, path, version = request.split()
-                if method not in self.supported_methods: # Check method before path
-                    self.write_code(501)
-                else:
-                    path = self.handle_path(path)
-                    if path: # File was found
-                        self.handle_method(method, path)
+            self.rfile = self.conn.makefile('rb', -1)
+            self.wfile = self.conn.makefile('wb', 0)
+            try:
+                request = self.rfile.readline(self.server.REQ_BUFFSIZE) # Ignore headers for now
+                # write 414
+                if not request:
+                    self.server.close_connection = True
+                    return
+            except socket.timeout, e:
+                self.server.close_connection = True
+                raise
+                return
+            method, path, version = request.split()
+            if method not in self.supported_methods: # Check method before path
+                self.write_code(501)
+            else:
+                path = self.handle_path(path)
+                if path: # File was found
+                    self.handle_method(method, path)
 
         except:
-            self.write_code(500) # Internal server error
             raise
+            self.write_code(500) # Internal server error
 
         finally:
             # Logging
-            if self.LOGGING and request: print("{0} - - [{1}] \"{2}\" {3} -".format(self.addr[0], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
-            if not request: print "emptry request"
+            if self.server.LOGGING and request: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), request.strip("\r\n"), self.code))
             # Finalize files
             self.wfile.flush()
             self.rfile.close()
             self.wfile.close()
-            self.conn.close()
+            #self.conn.close()
 
     def handle_method(self, method, path):
         self.write_code(200)
@@ -81,9 +89,9 @@ class HttpHandler():
 
     def write_head(self, path):
         size, mtime = self.get_file_info(path)
-        self.wfile.write("Connection: close\r\n") # HTTP 1.0
+        #self.wfile.write("Connection: keep-alive\r\n") # HTTP 1.0
         self.wfile.write("Content-Length: {0}\r\n".format(size))
-        self.wfile.write("Last-Modified: {0}\r\n".format(self.httpdate(datetime.datetime.fromtimestamp(mtime))))
+        #self.wfile.write("Last-Modified: {0}\r\n".format(self.httpdate(datetime.datetime.fromtimestamp(mtime))))
         self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)))
         self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())))
         self.wfile.write("Server: {0}\r\n\r\n".format("Bistro/" + __version__))
@@ -101,20 +109,25 @@ class HttpHandler():
             self.write_code(500)
             self.code = 500
             raise
+        if self.server.close_connection: self.wfile.write("Connection: close\r\n")
+        else: self.wfile.write("Connection: keep-alive\r\n") # HTTP 1.0
+
 
     def handle_path(self, path):
         # Lose parameters
         path = path.split("?",1)[0]
         path = path.split("#",1)[0]
-        path = self.PUBLIC_DIR + path
+        path = os.path.abspath(path)
+        path = self.server.PUBLIC_DIR + path
         if os.path.isdir(path):
-            for index in self.INDEX_FILES:
+            for index in self.server.INDEX_FILES:
                 index = os.path.join(path, index)
                 if os.path.isfile(index):
                     path = index
                     break
             else:
                 # Is a dir
+                self.server.close_connection = True
                 self.write_code(403)
                 return
         if os.path.isfile(path):
@@ -123,6 +136,7 @@ class HttpHandler():
         if os.path.isfile(path):
             return path
         # Not found
+        self.server.close_connection = True
         self.write_code(404)
 
     def get_file_info(self, filepath):
@@ -161,7 +175,9 @@ class HttpHandler():
 
 class ForkingServer():
 
-    def __init__(self, config_filename = "server.conf"):
+    close_connection = False
+
+    def __init__(self, host = "", port = 8000, config_filename = "server.conf"):
 
         # Reading settings from config file
         # If setting is missing, replace with default
@@ -172,11 +188,11 @@ class ForkingServer():
                 try:
                     self.HOST = config.get("server","host")
                 except:
-                    self.HOST = ""
+                    self.HOST = host
                 try:
                     self.PORT = config.getint("server","port")
                 except:
-                    self.PORT = 8000
+                    self.PORT = port
                 try:
                     self.REQ_BUFFSIZE = config.getint("server","request_buffsize")
                 except:
@@ -204,13 +220,17 @@ class ForkingServer():
 
                 f.close()
                 # Setting up the HTTP handler
-                self.handler = HttpHandler(self.HTTP_VERSION, self.INDEX_FILES, self.REQ_BUFFSIZE, self.PUBLIC_DIR)
+                self.handler = HttpHandler
 
         except IOError:
             # Should create a new config file
-            print "Missing configuration file"
-            print "Assuming default settings"
-            self.handler = HttpHandler()
+            print "* Missing configuration file"
+            print "* Assuming default settings"
+            self.HOST = host
+            self.PORT = port
+            self.handler = HttpHandler
+        # Set up socket
+        self.setup()
 
     def setup(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -218,23 +238,66 @@ class ForkingServer():
         self.socket.bind((self.HOST, self.PORT))
         self.socket.listen(5)
 
-    def serve_forever(self):
-        self.setup()
+    def _serve_non_persistent(self):
         print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
+        try:
+            while True:
+                pair = self.socket.accept()
+                if pair: # Not None
+                    conn, addr = pair
+                    pid = os.fork()
+                    if pid: # Parent
+                        conn.close()
+                    else: # Child
+                        self.socket.close()
+                        self.handler = HttpHandler(conn, addr, self)
+                        conn.close()
+                        os._exit(0)
+        except KeyboardInterrupt:
+            self.socket.close()
+            sys.exit(0)
 
-        while True:
-            pair = self.socket.accept()
-            if pair: # Not None
-                conn, addr = pair
-                pid = os.fork()
-                if pid: # Parent
-                    conn.close()
-                else: # Child
-                    self.socket.close()
-                    self.handler.handle_request(conn, addr)
-                    os._exit(0)
+    def serve_single(self):
+        print("* Waiting for a single HHTTP request at port {0}".format(self.PORT))
+        conn, addr = self.socket.accept()
+        if conn: self.handler = HttpHandler(conn, addr, self)
+        conn.close()
+        self.socket.close()
+
+    def serve_persistent(self):
+        self.connected = False
+        try:
+            while True:
+                #print "Accepting connections..."
+                if self.close_connection:
+                        self.conn.close()
+                        print "Closed connection"
+                        #connected = False
+                        os._exit(0)
+                if not self.connected:
+                    print "Accepting connections..."
+                    self.conn, addr = self.socket.accept()
+                    if self.conn:
+                        pid = os.fork()
+                        if pid: # Parent
+                            self.conn.close()
+                        else:
+                            self.socket.close()
+                            print "Connecting..."
+                            self.close_connection = False
+                            self.connected = True
+                            self.handler = HttpHandler(self.conn, addr, self)
+                else:
+                    print "Connected"
+                    self.handler.handle_conn()
+        except KeyboardInterrupt:
+            self.conn.close()
+            self.socket.close()
+
 
 if __name__ == "__main__":
     server = ForkingServer()
-    server.serve_forever()
+    #server.serve_single()
+    #server._serve_non_persistent()
+    server.serve_persistent()
     print "Bye"
