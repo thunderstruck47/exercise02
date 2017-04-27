@@ -32,7 +32,7 @@ index_files = index.html index.htm
 
 ### To do
 
-* ~~Handle ghost child processes~~
+* ~~Handle defunct child processes~~
 * HTTP/1.1 and HTTP/0.9 support
 * Directory file listing page
 * Proper documentation

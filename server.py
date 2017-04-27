@@ -276,6 +276,7 @@ class ForkingServer():
         self.socket.close()
 
     def serve_persistent(self):
+        self.conn = None
         self.connected = False
         self.close_connection = False
         print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
@@ -312,7 +313,7 @@ class ForkingServer():
                     print("Connected")
                     self.handler.handle_conn()
         except KeyboardInterrupt:
-            self.conn.close()
+            if self.conn: self.conn.close()
             self.socket.close()
 
     def signal_handler(self, signum, frame):
