@@ -8,7 +8,11 @@ import mimetypes
 import datetime
 import time
 import shutil
-import ConfigParser
+
+if sys.version_info > (3, 0):
+    import configparser
+else:
+    import ConfigParser
 
 class HttpHandler():
 
@@ -54,7 +58,7 @@ class HttpHandler():
                 if not request:
                     self.server.close_connection = True
                     return
-            except socket.timeout, e:
+            except socket.timeout as e:
                 self.server.close_connection = True
                 raise
                 return
@@ -177,62 +181,14 @@ class ForkingServer():
 
     close_connection = False
 
-    def __init__(self, host = "", port = 8000, config_filename = "server.conf"):
+    def __init__(self, config_filename = "server.conf"):
 
         # Reading settings from config file
         # If setting is missing, replace with default
-        try:
-            with open(config_filename,"rb") as f:
-                config = ConfigParser.ConfigParser()
-                config.readfp(f)
-                try:
-                    self.HOST = config.get("server","host")
-                except:
-                    self.HOST = host
-                try:
-                    self.PORT = config.getint("server","port")
-                except:
-                    self.PORT = port
-                try:
-                    self.REQ_BUFFSIZE = config.getint("server","request_buffsize")
-                except:
-                    self.REQ_BUFFSIZE = 4096
-                try:
-                    self.PUBLIC_DIR = config.get("server","public_dir")
-                except:
-                    self.PUBLIC_DIR = "www"
-                try:
-                    self.HTTP_VERSION = config.get("server","http_version")
-                except:
-                    self.HTTP_VERSION = 1.0
-                try:
-                    self.INDEX_FILES = config.get("server","index_files").split()
-                except:
-                    self.INDEX_FILES = ["index.html","index.htm"]
-                try:
-                    self.LOGGING = config.getboolean("server","logging")
-                except:
-                    self.LOGGING = True
-                try:
-                    self.LOG_FILE = config.get("server","log_file")
-                except:
-                    self.LOG_FILE = "server.log"
-
-                f.close()
-                # Setting up the HTTP handler
-                self.handler = HttpHandler
-
-        except IOError:
-            # Should create a new config file
-            print "* Missing configuration file"
-            print "* Assuming default settings"
-            self.HOST = host
-            self.PORT = port
-            self.handler = HttpHandler
-        # Set up socket
-        self.setup()
-
-    def setup(self):
+        self.configure(config_filename)
+        # Setting up the HTTP handler
+        self.handler = HttpHandler
+        # Set up a socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.HOST, self.PORT))
@@ -266,16 +222,17 @@ class ForkingServer():
 
     def serve_persistent(self):
         self.connected = False
+        self.close_connection = False
         try:
             while True:
                 #print "Accepting connections..."
                 if self.close_connection:
                         self.conn.close()
-                        print "Closed connection"
+                        print("Closed connection")
                         #connected = False
                         os._exit(0)
                 if not self.connected:
-                    print "Accepting connections..."
+                    print("Accepting connections...")
                     self.conn, addr = self.socket.accept()
                     if self.conn:
                         pid = os.fork()
@@ -283,21 +240,69 @@ class ForkingServer():
                             self.conn.close()
                         else:
                             self.socket.close()
-                            print "Connecting..."
+                            print("Connecting...")
                             self.close_connection = False
                             self.connected = True
                             self.handler = HttpHandler(self.conn, addr, self)
                 else:
-                    print "Connected"
+                    print("Connected")
                     self.handler.handle_conn()
         except KeyboardInterrupt:
             self.conn.close()
             self.socket.close()
 
+    def configure(self, filepath):
+        # Defaults:
+        self.HOST = ""
+        self.PORT = 8000
+        self.REQ_BUFFSIZE = 4096
+        self.PUBLIC_DIR = "www"
+        self.HTTP_VERSION = 1.0
+        self.INDEX_FILES = ["index.html","index.htm"]
+        self.LOGGING = True
+        self.LOG_FILE = "server.log"
+        # Python 3.^
+        if sys.version_info > (3, 0):
+            config = configparser.ConfigParser()
+            config.read(filepath)
+            for key in config["server"]:
+                try:
+                    if key.upper() in ["PORT","REQ_BUFFSIZE"]: value = int(config["server"][key])
+                    elif key.upper() == "INDEX_FILES": value = config["server"][key].split()
+                    else: value = str(config["server"][key])
+                    setattr(self, key.upper(), value)
+                    print(getattr(self, key.upper()))
+                except ValueError:
+                    raise
+            print(self.REQ_BUFFSIZE)
+        # Python 2.^
+        else:
+            try:
+                with open(filepath,"rb") as f:
+                    config = ConfigParser.ConfigParser()
+                    config.readfp(f)
+                    for pair in config.items("server"):
+                        try:
+                            key, value = pair[0], pair[1]
+                            if key.upper() in ["PORT", "REQ_BUFFSIZE"]: value = int(value)
+                            elif key.upper() == "INDEX_FILES": value = value.split()
+                            elif key.upper() == "LOGGING": value = bool(value)
+                            setattr(self, pair[0].upper(), value)
+                            print(getattr(self, pair[0].upper()))
+                        except ValueError:
+                            raise
+            except IOError:
+                # Should create a new config file
+                print("* Missing configuration file")
+                print("* Assuming default settings")
+
+    def log(self, message):
+        # To be implemented
+        pass
 
 if __name__ == "__main__":
     server = ForkingServer()
     #server.serve_single()
     #server._serve_non_persistent()
     server.serve_persistent()
-    print "Bye"
+    print("Bye")
