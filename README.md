@@ -2,20 +2,20 @@
 
 A very simple HTTP static file server
 
-## Dependencies
+### Dependencies
 
 Needs a Python 2.7 interpreter
 
-## Features
+### Features
 
 * Basic configuration
-* Serve static files
+* Serves static files
 * Persistent, non persistent and single connections
-* Handle concurrent requests via forking
-* Supports HTTP GET, HEAD and POST(currently replicates GET, parameters ignored)
-* Currently implemented HTTP/1.0
+* Handles concurrent requests via forking
+* Supports HTTP GET, HEAD and POST(works the same as GET; parameters are ignored)
+* Currently supports HTTP/1.0
 
-## Configuration
+### Configuration
 
 Example configuration file
 
@@ -27,3 +27,9 @@ public_dir = www
 request_buffsize = 4096
 index_files = index.html index.htm
 ````
+
+### To do
+
+* Handle ghost child processes
+* Implement HTTP/1.1
+* List directory page
