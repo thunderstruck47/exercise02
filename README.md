@@ -13,7 +13,7 @@ Requires [python-magic](https://github.com/ahupp/python-magic) community module 
 * Speaks (partially) HTTP/0.9, HTTP/1.0 and HTTP/1.1
 * Supports GET, HEAD and POST(ignores parameters) for HTTP/1.0 and HTTP/1.1
 * Servers static files only (no WSGI)
-* Basic server configuration via configuration file
+* Basic server configuration via file
 * Handles persistent, non persistent and single connections
 * Handles concurrent requests via forking
 
