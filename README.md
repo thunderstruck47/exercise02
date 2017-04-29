@@ -8,14 +8,11 @@ Currently compatible with GNU/Linux and UNIX systems. Needs a Python 2 interpret
 
 ### Installation and Start-up
 
-Get the code
+Get the code, edit the server.conf file (you can use the example config below) and start the server. I.e.
 ````
 git clone https://github.com/thunderstruck47/exercise02.git
 cd exercise02
-````
-Edit the server.conf file (you can use the example config below)
-Start the server
-````
+vim server.conf
 python2 server.py
 ````
 
