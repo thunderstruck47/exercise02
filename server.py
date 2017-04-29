@@ -369,9 +369,5 @@ if __name__ == "__main__":
     server = ForkingServer()
     #server.serve_single()
     #server._serve_non_persistent()
-    #server.serve_persistent()
-    try:
-        magic.from_file(filepath, mime=True)
-    except NameError: # If magic was not imported
-        print "success"
+    server.serve_persistent()
     print("Bye")
