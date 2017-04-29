@@ -4,11 +4,20 @@ A very simple HTTP static file server
 
 ### Dependencies
 
-Compatible with GNU/Linux and UNIX systems
+Currently compatible with GNU/Linux and UNIX systems. Needs a Python 2 interpreter (soon to be working with Python 3). Optionally, requires [python-magic](https://github.com/ahupp/python-magic) module for advanced file type identification
 
-Currently works with a Python 2.7 interpreter, with Python 3 version on it's way..
+### Installation and Start-up
 
-Requires (optionally) [python-magic](https://github.com/ahupp/python-magic) module for advanced file type identification
+Get the code
+````
+git clone https://github.com/thunderstruck47/exercise02.git
+cd exercise02
+````
+Edit the server.conf file (you can use the example config below)
+Start the server
+````
+python2 server.py
+````
 
 ### Features
 
@@ -39,4 +48,4 @@ index_files = index.html index.htm
 * Directory file listing page
 * Proper documentation
 * Proper logging
-* Testing
+* Automated tests
