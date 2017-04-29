@@ -4,9 +4,11 @@ A very simple HTTP static file server
 
 ### Dependencies
 
+Compatible with GNU/Linux and UNIX systems
+
 Currently works with a Python 2.7 interpreter, with Python 3 version on it's way..
 
-Requires [python-magic](https://github.com/ahupp/python-magic) community module for file type identification (based on libmagic) (should be optional)
+Requires (optionally) [python-magic](https://github.com/ahupp/python-magic) module for advanced file type identification
 
 ### Features
 
@@ -37,3 +39,4 @@ index_files = index.html index.htm
 * Directory file listing page
 * Proper documentation
 * Proper logging
+* Testing

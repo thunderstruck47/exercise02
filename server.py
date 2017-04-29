@@ -12,14 +12,17 @@ import datetime
 import time
 import shutil
 
+# Import correct config parser
 if sys.version_info > (3, 0):
     import configparser
 else:
     import ConfigParser
 
-# Community modules
-# Should be made optional
-import magic
+# Community modules (optional)
+try:
+    import magic
+except ImportError:
+    pass
 
 class HttpHandler():
 
@@ -204,7 +207,10 @@ class HttpHandler():
             return self.extensions_map[""]
         # Use libmagic if unknown type
         else:
-            return magic.from_file(filepath, mime=True)
+            try:
+                return magic.from_file(filepath, mime=True)
+            except NameError: # If magic was not imported
+                return self.extensions_map[""]
 
     def httpdate(self, dt):
         """Return a string representation of a date according to RFC 1123
@@ -363,5 +369,9 @@ if __name__ == "__main__":
     server = ForkingServer()
     #server.serve_single()
     #server._serve_non_persistent()
-    server.serve_persistent()
+    #server.serve_persistent()
+    try:
+        magic.from_file(filepath, mime=True)
+    except NameError: # If magic was not imported
+        print "success"
     print("Bye")
