@@ -53,7 +53,18 @@ class HttpHandler():
         self.addr = addr
         self.server = server
         self.server.headers = True
-        self.handle_conn()
+
+        # To Do: Introduce error handling
+        if self.server.HTTP_VERSION == "1.0":
+            self.keep_alive = False
+        elif self.server.HTTP_VERSION == "1.1":
+            self.keep_alive = True
+
+        try:
+            self.handle_conn()
+        except socket.error as e:
+            print "error"
+            self.server.close_connection = True
 
     # Handles current connection
     def handle_conn(self):
@@ -61,17 +72,39 @@ class HttpHandler():
         self.code = None
         try:
             self.conn.settimeout(None)
-            self.rfile = self.conn.makefile('rb', -1)
+            #self.rfile = self.conn.makefile('rb', -1)
             self.wfile = self.conn.makefile('wb', 0)
             try:
-                firstline = self.rfile.readline(self.server.REQ_BUFFSIZE) # Ignore headers for now
+                #firstline = self.rfile.readlines(self.server.REQ_BUFFSIZE) # Ignore headers for now
+                self.request =  self.conn.recv(self.server.REQ_BUFFSIZE).splitlines()
+                firstline = self.request[0]
+                headers = self.request[1:]
+                print headers
+                for header in headers:
+                    if header == "\r\n": break
+                    try:
+                        field, value = [x.strip() for x in header.split(":")]
+                        if field.lower() == "connection":
+                            if value.lower() == "close":
+                                self.keep_alive = False
+                                print "Connection : close"
+                            elif value.lower() == "keep-alive":
+                                self.keep_alive = True
+                                print "Connection : keep-alive"
+                    except:
+                        continue
+                        # Should be able to handle invalid headers
+
+                #print self.server.socket.recv(self.server.REQ_BUFFSIZE)
                 # write 414
                 if not firstline:
                     self.server.close_connection = True
                     return
-            except socket.timeout as e:
+            except Exception as e:
                 self.server.close_connection = True
-                raise
+                #raise
+                print "bb"
+                print e
                 return
             request = firstline.split()
             if len(request) == 3: # HTTP/1.0 AND HTTP/1.1
@@ -96,16 +129,20 @@ class HttpHandler():
                     elif method not in self.supported_methods: # Valid method?
                         self.write_code(501)
                     else: # Proceeed
-                        if version_number == (1, 0):
-                            self.server.close_connection = True
-                            self.version = "1.0"
-                        elif version_number == (1, 1):
-                            self.server.close_connection = False
-                            self.version = "1.1"
+                        if not self.keep_alive: self.server.close_connection = True
+                        else: self.server.close_connection = False
+                        #if version_number == (1, 0):
+                        #    if self.keep_alive == False:
+                        #        self.server.close_connection = True
+                        #        #self.version = "1.0"
+                        #elif version_number == (1, 1):
+                        #    if self.keep_alive == False:
+                        #        self.server.close_connection = False
+                        #        #self.version = "1.1"
                         path = self.handle_path(path)
                         if path: # File was found
                             self.handle_method(method, path)
-            elif len(request) == 2:
+            elif len(request) == 2: #HTTP/0.9
                 method, path = request
                 if method == "GET":
                     self.server.close_connection = True
@@ -124,7 +161,7 @@ class HttpHandler():
             if self.server.LOGGING and request: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), firstline.strip("\r\n"), self.code))
             # Finalize files
             self.wfile.flush()
-            self.rfile.close()
+            #self.rfile.close()
             self.wfile.close()
 
     def handle_method(self, method, path):
@@ -238,7 +275,7 @@ class ForkingServer():
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.HOST, self.PORT))
-        self.socket.listen(5)
+        self.socket.listen(5) # Test queue
 
     def configure(self, filepath):
         # Defaults:
@@ -340,7 +377,7 @@ class ForkingServer():
                         else:
                             raise
                     if self.conn:
-                        pid = os.fork()
+                        pid = os.fork() # Needs error handling
                         if pid: # Parent
                             self.conn.close()
                         else:
