@@ -58,6 +58,7 @@ class HttpHandler():
         #if self.server.HTTP_VERSION == 1.0:
         #    self.keep_alive = False
         if self.server.HTTP_VERSION == 1.1:
+            self.version = "HTTP/1.1"
             self.server.close_connection = False
 
         try:
@@ -117,6 +118,10 @@ class HttpHandler():
             self.code = 505
             #self.write_code(505) # Not supported
             return False
+        if version != "HTTP/1.1" and version != "HTTP/1.0":
+            self.code = 505
+            self.server.close_connection = True
+            return False
         return True
 
     def valid_http_method(self,method):
@@ -128,6 +133,7 @@ class HttpHandler():
 
     def parse_request(self):
         request = self.conn.recv(self.server.REQ_BUFFSIZE).split("\r\n\r\n",1)
+        print request
         # Check for body
         if len(request) >= 1: #Only header
             header = [x.strip() for x in request[0].split("\r\n")] # List of header fields
@@ -157,7 +163,7 @@ class HttpHandler():
                 self.server.close_connection = True
                 self.code = 400
             self.request = [header]
-        if len(request) == 2 and method == "POST": #Prepare body
+        if len(request) == 2 and self.method == "POST": #Prepare body
             body = request[1]
             self.request.append(body)
         else:
@@ -188,7 +194,7 @@ class HttpHandler():
 
         finally:
             # Logging
-            #if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), (self.request[0][0]), self.code))
+            if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), (self.request[0][0]), self.code))
             # Finalize files
             self.wfile.flush()
             #self.rfile.close()
