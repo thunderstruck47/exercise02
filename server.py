@@ -30,6 +30,7 @@ class HttpHandler():
     supported_methods = ["GET", "HEAD", "POST"]
     responses = {
         200: "OK",
+        201: "Created",
         400: "Bad Request",
         403: "Forbidden",
         404: "Not Found",
@@ -84,11 +85,11 @@ class HttpHandler():
             if field.lower() == "connection":
                 if value.lower() == "close":
                     self.server.close_connection = True
-                    print "Connection : close"
+                    #print "Connection : close"
                     return True
                 elif value.lower() == "keep-alive":
                     self.server.close_connection = False
-                    print "Connection : keep-alive"
+                    #print "Connection : keep-alive"
                     return True
             return False
         except:
@@ -102,7 +103,6 @@ class HttpHandler():
             return False
         try:
             version_number = version.split("/",1)[1].split(".")
-            print version_number
             if len(version_number) != 2:
                 raise ValueError
             version_number = int(version_number[0]), int(version_number[1])
@@ -125,7 +125,6 @@ class HttpHandler():
         return True
 
     def valid_http_method(self,method):
-        print method
         if method not in self.supported_methods:
             self.code = 400
             return False
@@ -133,12 +132,10 @@ class HttpHandler():
 
     def parse_request(self):
         request = self.conn.recv(self.server.REQ_BUFFSIZE).split("\r\n\r\n",1)
-        print request
         # Check for body
         if len(request) >= 1: #Only header
             header = [x.strip() for x in request[0].split("\r\n")] # List of header fields
             firstline =  header[0].split()
-            print firstline
             # Long method
             if len(firstline) == 3: # HTTP/1.0 AND HTTP/1.1
                 method, path, version = firstline
@@ -185,20 +182,16 @@ class HttpHandler():
                 self.handle_request(self.method,self.path,self.version)
             else:
                 self.write_code(self.code)
-
-        except:
-            raise
-            #self.wfile.seek(0)
-            #self.wfile.turncate()
-            self.write_code(500) # Internal server error
-
-        finally:
             # Logging
             if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), (self.request[0][0]), self.code))
             # Finalize files
             self.wfile.flush()
             #self.rfile.close()
             self.wfile.close()
+
+        except socket.error as e:
+            if e.errno == errno.EPIPE:
+                print("{0}:{1} - - [{2}] Connection interrupted (Broken pipe) -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
 
     def handle_request(self, method, path, version):
         if method == "GET":
@@ -209,6 +202,9 @@ class HttpHandler():
         elif method == "POST":
             print "POST body:"
             print self.request[1]
+            #if self.code == 201:
+            #
+            #else:
             self.write_head(path)
             self.write_body(path)
 
@@ -228,15 +224,9 @@ class HttpHandler():
         f.close()
 
     def write_code(self, code):
-        try:
-            if self.version != "HTTP/0.9": self.wfile.write("{0} {1} {2}\r\n".format(self.version, code, self.responses[code]))
-            else: self.wfile.write("{0} {1}\r\n".format(code, self.responses[code]))
-            #self.code = code
-        except:
-            self.write_code(500)
-            #self.code = 500
-            raise
-
+        if self.version != "HTTP/0.9": self.wfile.write("{0} {1} {2}\r\n".format(self.version, code, self.responses[code]))
+        else: self.wfile.write("{0} {1}\r\n".format(code, self.responses[code]))
+        #self.code = code
         if self.version != "HTTP/0.9":
             if self.server.close_connection: self.wfile.write("Connection: close\r\n")
             else: self.wfile.write("Connection: keep-alive\r\n") # HTTP 1.0
@@ -255,7 +245,10 @@ class HttpHandler():
                     path = index
                     break
             else:
-                # Is a dir
+                # Is a diri
+                #if os.path.dirname(path) == "www/uploads":
+                #    code = 201
+                #    return path
                 self.server.close_connection = True
                 #self.write_code(403)
                 self.code = 403
@@ -295,6 +288,12 @@ class HttpHandler():
                 return magic.from_file(filepath, mime=True)
             except NameError: # If magic was not imported
                 return self.extensions_map[""]
+
+    def reverse_file_type(self, filetype):
+        for key, value in self.extensions_map.items():
+            if value == filetype:
+                return key
+        return ""
 
     def httpdate(self, dt):
         """Return a string representation of a date according to RFC 1123
@@ -412,11 +411,12 @@ class ForkingServer():
                 #print "Accepting connections..."
                 if self.close_connection:
                         self.conn.close()
-                        print("Closed connection")
+                        print("{0}:{1} - - [{2}] Closed connection -".format(self.handler.addr[0], self.handler.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                         #connected = False
+                        #print("Handler {0} - - [{1}] Closed".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()))) 
                         os._exit(0)
                 if not self.connected:
-                    print("Accepting connections...")
+                    #print("Handler {0} - - [{1}] Accepting connections...".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                     try:
                         self.conn, addr = self.socket.accept()
                     except IOError as e:
@@ -427,16 +427,16 @@ class ForkingServer():
                             raise
                     if self.conn:
                         pid = os.fork() # Needs error handling
-                        if pid: # Parent
+                        if pid != 0: # Parent
                             self.conn.close()
                         else:
                             self.socket.close()
-                            print("Connecting...")
+                            print("{0}:{1} - - [{2}] Connecting... -".format(addr[0], addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()) ))
                             #self.close_connection = True
                             self.connected = True
                             self.handler = HttpHandler(self.conn, addr, self)
                 else:
-                    print("Connected")
+                    print("{0}:{1} - - [{2}] Already connected -".format(self.handler.addr[0], self.handler.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                     self.handler.handle_conn()
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
