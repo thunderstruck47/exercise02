@@ -1,6 +1,6 @@
 *.un~
 *~
-www/cs.html
+www/*
 tests/experimental
 tests/siege
 tests/a.sh
