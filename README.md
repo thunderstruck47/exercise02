@@ -4,7 +4,7 @@ A very simple HTTP static file server
 
 ### Dependencies
 
-Currently compatible with GNU/Linux and UNIX systems. Needs a Python 2 interpreter (soon to be working with Python 3). Optionally, requires [python-magic](https://github.com/ahupp/python-magic) module for advanced file type identification
+Currently compatible with GNU/Linux and UNIX systems. Works with Python 2.7 and Python 3.x interpreters. Optionally but recommended, requires [python-magic](https://github.com/ahupp/python-magic) module for advanced file type identification
 
 ### Installation and Start-up
 
@@ -42,6 +42,7 @@ index_files = index.html index.htm
 
 * ~~Handle defunct child processes~~
 * ~~HTTP/1.1 and HTTP/0.9 support~~
+* CGI-compatible
 * Directory file listing page
 * Proper documentation
 * Proper logging

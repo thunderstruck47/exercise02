@@ -65,7 +65,7 @@ class HttpHandler():
         try:
             self.handle_conn()
         except socket.error as e:
-            print "error"
+            print("Socket error")
 
     # Not used
     def buffered_readLine(self,socket):
@@ -76,7 +76,7 @@ class HttpHandler():
                 line += c
             elif c == "\n":
                 break
-        print "Line:" + line
+        print("Line:" + line)
         return line.strip("\r")
 
     def should_keep_alive(self, line):
@@ -131,7 +131,8 @@ class HttpHandler():
         return True
 
     def parse_request(self):
-        request = self.conn.recv(self.server.REQ_BUFFSIZE).split("\r\n\r\n",1)
+        request = self.conn.recv(int(self.server.REQ_BUFFSIZE))
+        request = request.decode().split("\r\n\r\n",1)
         # Check for body
         if len(request) >= 1: #Only header
             header = [x.strip() for x in request[0].split("\r\n")] # List of header fields
@@ -200,8 +201,8 @@ class HttpHandler():
         elif method =="HEAD":
             self.write_head(path)
         elif method == "POST":
-            print "POST body:"
-            print self.request[1]
+            print("POST body:")
+            print(self.request[1])
             #if self.code == 201:
             #
             #else:
@@ -211,25 +212,25 @@ class HttpHandler():
 
     def write_head(self, path):
         size, mtime = self.get_file_info(path)
-        self.wfile.write("Content-Length: {0}\r\n".format(size))
+        self.wfile.write("Content-Length: {0}\r\n".format(size).encode())
         # if caching:
         #self.wfile.write("Last-Modified: {0}\r\n".format(self.httpdate(datetime.datetime.fromtimestamp(mtime))))
-        self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)))
-        self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())))
-        self.wfile.write("Server: {0}\r\n\r\n".format("Bistro/" + __version__))
+        self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)).encode())
+        self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())).encode())
+        self.wfile.write("Server: {0}\r\n\r\n".format("Bistro/" + __version__).encode())
 
     def write_body(self, path):
-        f = open(path, "r")
+        f = open(path, "rb")
         shutil.copyfileobj(f,self.wfile)
         f.close()
 
     def write_code(self, code):
-        if self.version != "HTTP/0.9": self.wfile.write("{0} {1} {2}\r\n".format(self.version, code, self.responses[code]))
-        else: self.wfile.write("{0} {1}\r\n".format(code, self.responses[code]))
+        if self.version != "HTTP/0.9": self.wfile.write("{0} {1} {2}\r\n".format(self.version, code, self.responses[code]).encode())
+        else: self.wfile.write("{0} {1}\r\n".format(code, self.responses[code]).encode())
         #self.code = code
         if self.version != "HTTP/0.9":
-            if self.server.close_connection: self.wfile.write("Connection: close\r\n")
-            else: self.wfile.write("Connection: keep-alive\r\n") # HTTP 1.0
+            if self.server.close_connection: self.wfile.write("Connection: close\r\n".encode())
+            else: self.wfile.write("Connection: keep-alive\r\n".encode()) # HTTP 1.0
 
 
     def handle_path(self, path):
@@ -286,7 +287,7 @@ class HttpHandler():
         else:
             try:
                 return magic.from_file(filepath, mime=True)
-            except NameError: # If magic was not imported
+            except Exception: # If magic was not imported
                 return self.extensions_map[""]
 
     def reverse_file_type(self, filetype):
@@ -320,7 +321,8 @@ class ForkingServer():
         # Set up a socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.socket.bind((self.HOST, self.PORT))
+        self.PORT = 8000
+        self.socket.bind((self.HOST, int(self.PORT)))
         self.socket.listen(5) # Test queue
 
     def configure(self, filepath):
@@ -339,7 +341,7 @@ class ForkingServer():
             config.read(filepath)
             for key in config["server"]:
                 try:
-                    if key.upper() in ["PORT","REQ_BUFFSIZE"]: value = int(config["server"][key])
+                    if key.upper() == "PORT" or key.upper == "REQ_BUFFSIZE": value = int(config["server"][key])
                     if key.upper() == "HTTP_VERSION": value = float(config["server"][key])
                     elif key.upper() == "INDEX_FILES": value = config["server"][key].split()
                     else: value = str(config["server"][key])
@@ -347,7 +349,7 @@ class ForkingServer():
                     #print(getattr(self, key.upper()))
                 except ValueError:
                     raise
-            print(self.REQ_BUFFSIZE)
+            print(type(self.REQ_BUFFSIZE))
         # Python 2.^
         else:
             try:
@@ -361,6 +363,7 @@ class ForkingServer():
                             elif key.upper() == "HTTP_VERSION": value = float(value)
                             elif key.upper() == "INDEX_FILES": value = value.split()
                             elif key.upper() == "LOGGING": value = bool(value)
+                            print(value,type(value))
                             setattr(self, pair[0].upper(), value)
                             #print(getattr(self, pair[0].upper()))
                         except ValueError:

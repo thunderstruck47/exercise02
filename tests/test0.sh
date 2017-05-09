@@ -4,8 +4,8 @@
 
 ## Create CSV file
 today=`date '+%Y_%m_%d__%H_%M_%S'`;
-duration="20s"
-filename="data/test0_$duration-$today"
+duration="60s"
+filename="test0_$duration-$today"
 
 ## File headers
 echo "Concurrency,RPS(Persistent connections),RPS(Nonpersistent connections)" >> data/$filename.csv
