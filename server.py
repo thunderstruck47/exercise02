@@ -4,6 +4,7 @@ __version__ = "0.0.1"
 # Standard modules
 import socket
 import os
+import subprocess
 import signal
 import errno
 import sys
@@ -171,6 +172,7 @@ class HttpHandler():
     def handle_conn(self):
         request = None
         self.code = None
+        self.cgi = None
         try:
             self.conn.settimeout(None)
             #self.rfile = self.conn.makefile('rb', -1)
@@ -180,7 +182,8 @@ class HttpHandler():
             #time.sleep(5)
             if self.code == 200:
                 self.write_code(200)
-                self.handle_request(self.method,self.path,self.version)
+                if not self.cgi: self.handle_request(self.method,self.path,self.version)
+                else: self.handle_cgi(self.path)
             else:
                 self.write_code(self.code)
             # Logging
@@ -193,6 +196,16 @@ class HttpHandler():
         except socket.error as e:
             if e.errno == errno.EPIPE:
                 print("{0}:{1} - - [{2}] Connection interrupted (Broken pipe) -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+
+    def handle_cgi(self, path):
+        process = subprocess.Popen(["./" + path], stdout = subprocess.PIPE)
+        (output, err) = process.communicate()
+        exit_code = process.wait()
+
+        size = sys.getsizeof(output.split(b"\r\n\r\n")[1])
+        output = "Content-Length: {0}\r\n".format(size).encode() + output
+
+        self.wfile.write(output)
 
     def handle_request(self, method, path, version):
         if method == "GET":
@@ -238,6 +251,12 @@ class HttpHandler():
         path = path.split("?",1)[0]
         path = path.split("#",1)[0]
         path = os.path.abspath(path)
+        # CGI?
+        if path.startswith("/cgi-bin/"):
+            if os.path.isfile(self.server.PUBLIC_DIR + path):
+                self.code = 200
+                self.cgi = True
+                return self.server.PUBLIC_DIR + path
         path = self.server.PUBLIC_DIR + path
         if os.path.isdir(path):
             for index in self.server.INDEX_FILES:
