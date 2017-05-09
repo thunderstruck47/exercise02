@@ -131,7 +131,7 @@ class HttpHandler():
         return True
 
     def parse_request(self):
-        request = self.conn.recv(int(self.server.REQ_BUFFSIZE))
+        request = self.conn.recv(self.server.REQ_BUFFSIZE)
         request = request.decode().split("\r\n\r\n",1)
         # Check for body
         if len(request) >= 1: #Only header
@@ -322,7 +322,7 @@ class ForkingServer():
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.PORT = 8000
-        self.socket.bind((self.HOST, int(self.PORT)))
+        self.socket.bind((self.HOST, self.PORT))
         self.socket.listen(5) # Test queue
 
     def configure(self, filepath):
@@ -341,15 +341,15 @@ class ForkingServer():
             config.read(filepath)
             for key in config["server"]:
                 try:
-                    if key.upper() == "PORT" or key.upper == "REQ_BUFFSIZE": value = int(config["server"][key])
-                    if key.upper() == "HTTP_VERSION": value = float(config["server"][key])
+                    value = config["server"][key]
+                    if key.upper() == "PORT" or key.upper() == "REQ_BUFFSIZE": value = int(value)
+                    elif key.upper() == "HTTP_VERSION": value = float(config["server"][key])
                     elif key.upper() == "INDEX_FILES": value = config["server"][key].split()
                     else: value = str(config["server"][key])
                     setattr(self, key.upper(), value)
                     #print(getattr(self, key.upper()))
                 except ValueError:
                     raise
-            print(type(self.REQ_BUFFSIZE))
         # Python 2.^
         else:
             try:

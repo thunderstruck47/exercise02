@@ -1,6 +1,7 @@
 *.un~
 *~
 www/*
+server_old.py
 tests/experimental
 tests/siege
 tests/a.sh
