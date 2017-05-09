@@ -1,6 +1,9 @@
 *.un~
 *~
-www/*
+www/cs.html
+www/sari.html
+www/upload.html
+www/uploads
 server_old.py
 tests/experimental
 tests/siege
