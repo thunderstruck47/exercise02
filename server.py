@@ -62,23 +62,96 @@ class HttpHandler():
         if self.server.HTTP_VERSION == 1.1:
             self.version = "HTTP/1.1"
             self.server.close_connection = False
+        elif self.server.HTTP_VERSION == 1.0:
+            self.version = "HTTP/1.0"
 
         try:
             self.handle_conn()
         except socket.error as e:
+            raise
             print("Socket error")
 
-    # Not used
-    def buffered_readLine(self,socket):
-        line = ""
-        while True:
-            c = socket.recv(1)
-            if c != "\n":
-                line += c
-            elif c == "\n":
-                break
-        print("Line:" + line)
-        return line.strip("\r")
+    # Handles current connection
+    def handle_conn(self):
+        request = None
+        self.code = None
+        self.cgi = None
+        try:
+            self.conn.settimeout(None)
+            #self.rfile = self.conn.makefile('rb', -1)
+            self.wfile = self.conn.makefile('wb', 0)
+            #time.sleep(5)
+            self.parse_request()
+            #time.sleep(5)
+            if not self.code:
+                self.server.close_connection = True
+                self.wfile.close()
+                print("{0}:{1} - - [{2}] Client disconnected -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+                return
+            print self.code
+            if self.code == 200:
+                self.write_code(200)
+                if not self.cgi: self.handle_request(self.method,self.path,self.version)
+                else: self.handle_cgi(self.path)
+            else:
+                self.write_code(self.code)
+                self.wfile.write(b"Content-Length: 0\r\n\r\n")
+            # Logging
+            if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), (self.request[0][0]), self.code))
+            # Finalize files
+            #self.wfile.write(b"Content-Length: 0\r\n")
+            self.wfile.flush()
+            #self.rfile.close()
+            self.wfile.close()
+
+        except socket.error as e:
+            raise
+            if e.errno == errno.EPIPE:
+                print("{0}:{1} - - [{2}] Connection interrupted (Broken pipe) -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+
+    def parse_request(self):
+        self.content_length = ""
+        self.method = ""
+        self.path = ""
+        request = self.conn.recv(self.server.REQ_BUFFSIZE) # Needs fixing
+        request = request.decode().split("\r\n\r\n",1)
+        #print(len("\r\n".encode('utf-8')))
+        # Check for body
+        if len(request) >= 1: #Only header
+            if request[0] == "": return
+            header = [x.strip() for x in request[0].split("\r\n")] # List of header fields
+            firstline =  header[0].split()
+            # Long method
+            if len(firstline) == 3: # HTTP/1.0 AND HTTP/1.1
+                method, path, version = firstline
+                if self.valid_http_method(method) and self.valid_http_version(version):
+                    if version == "HTTP/1.1" : self.server.close_connection = False
+                    if version == "HTTP/1.0" : self.server.close_connection = True
+                    for line in header[1:]:
+                        self.should_keep_alive(line)
+                    self.method = method
+                    self.version = version
+                    self.path = self.handle_path(path)
+            elif len(firstline) == 2: #HTTP/0.9
+                method, path = firstline
+                self.version = "HTTP/0.9"
+                self.server.close_connection = True
+                if method == "GET":
+                    self.method = method
+                    self.path = self.handle_path(path)
+                else:
+                    self.code = 400
+            else:
+                self.server.close_connection = True
+                self.code = 400
+            self.request = [header]
+        if len(request) == 2 and self.method == "POST": #Prepare body
+            body = request[1]
+            size = len(body.encode('utf-8'))
+            if size < self.content_length:
+                body = body + self.conn.recv(self.content_length - size).decode()
+            self.request.append(body)
+            #print(body)
 
     def should_keep_alive(self, line):
         try:
@@ -92,6 +165,8 @@ class HttpHandler():
                     self.server.close_connection = False
                     #print "Connection : keep-alive"
                     return True
+            elif field.lower() == "content-length":
+                self.content_length = int(value)
             return False
         except:
             pass
@@ -131,81 +206,33 @@ class HttpHandler():
             return False
         return True
 
-    def parse_request(self):
-        request = self.conn.recv(self.server.REQ_BUFFSIZE)
-        request = request.decode().split("\r\n\r\n",1)
-        # Check for body
-        if len(request) >= 1: #Only header
-            header = [x.strip() for x in request[0].split("\r\n")] # List of header fields
-            firstline =  header[0].split()
-            # Long method
-            if len(firstline) == 3: # HTTP/1.0 AND HTTP/1.1
-                method, path, version = firstline
-                if self.valid_http_method(method) and self.valid_http_version(version):
-                    if version == "HTTP/1.1" : self.server.close_connection = False
-                    if version == "HTTP/1.0" : self.server.close_connection = True
-                    for line in header[1:]:
-                        self.should_keep_alive(line)
-                    self.method = method
-                    self.version = version
-                    self.path = self.handle_path(path)
-            elif len(firstline) == 2: #HTTP/0.9
-                method, path = firstline
-                self.version = "HTTP/0.9"
-                self.server.close_connection = True
-                if method == "GET":
-                    self.method = method
-                    self.path = self.handle_path(path)
-                else:
-                    self.code = 400
-            else:
-                self.server.close_connection = True
-                self.code = 400
-            self.request = [header]
-        if len(request) == 2 and self.method == "POST": #Prepare body
-            body = request[1]
-            self.request.append(body)
-        else:
-            pass # Empty request
-
-    # Handles current connection
-    def handle_conn(self):
-        request = None
-        self.code = None
-        self.cgi = None
-        try:
-            self.conn.settimeout(None)
-            #self.rfile = self.conn.makefile('rb', -1)
-            self.wfile = self.conn.makefile('wb', 0)
-            #time.sleep(5)
-            self.parse_request()
-            #time.sleep(5)
-            if self.code == 200:
-                self.write_code(200)
-                if not self.cgi: self.handle_request(self.method,self.path,self.version)
-                else: self.handle_cgi(self.path)
-            else:
-                self.write_code(self.code)
-            # Logging
-            if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), (self.request[0][0]), self.code))
-            # Finalize files
-            self.wfile.flush()
-            #self.rfile.close()
-            self.wfile.close()
-
-        except socket.error as e:
-            if e.errno == errno.EPIPE:
-                print("{0}:{1} - - [{2}] Connection interrupted (Broken pipe) -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-
     def handle_cgi(self, path):
-        process = subprocess.Popen(["./" + path], stdout = subprocess.PIPE)
-        (output, err) = process.communicate()
+        env = {}
+        env["SERVER_NAME"] = self.server.name
+        env["SERVER_SOFTWARE"] = self.server.version_string
+        env["GATEWAY_INTERFACE"] = "CGI/1.1"
+        env["SERVER_PROTOCOL"] = self.version
+        env["SERVER_PORT"] = str(self.server.PORT)
+        env["REQUEST_METHOD"] = self.method
+        env["REMOTE_ADDR"] = str(self.addr[0])
+        env["REMOTE_PORT"] = str(self.addr[1])
+        env["QUERY_STRING"] = self.query_string
+        env["PATH_INFO"] = path
+        env["SCRIPT_NAME"] = self.filename
+        env["CONTENT_LENGTH"] = str(self.content_length)
+
+        process = subprocess.Popen(["./" + path], stdin = subprocess.PIPE, stdout = subprocess.PIPE, env = env)
+        if len(self.request)>1: stdin = self.request[1].encode()
+        else: stdin = ""
+        (output, err) = process.communicate(stdin)
         exit_code = process.wait()
 
-        size = sys.getsizeof(output.split(b"\r\n\r\n")[1])
-        output = "Content-Length: {0}\r\n".format(size).encode() + output
+        #if exit_code == 1:
+        self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())).encode())
+        self.wfile.write("Server: {0}\r\n".format("Bistro/" + __version__).encode())
 
         self.wfile.write(output)
+        #else: self.write_code(500)
 
     def handle_request(self, method, path, version):
         if method == "GET":
@@ -214,13 +241,14 @@ class HttpHandler():
         elif method =="HEAD":
             self.write_head(path)
         elif method == "POST":
-            print("POST body:")
-            print(self.request[1])
+            self.handle_request("GET", path,version)
+            #print("POST body:")
+            #print(self.request[1])
             #if self.code == 201:
             #
             #else:
-            self.write_head(path)
-            self.write_body(path)
+            #self.write_head(path)
+            #self.write_body(path)
 
 
     def write_head(self, path):
@@ -247,13 +275,20 @@ class HttpHandler():
 
 
     def handle_path(self, path):
+        self.query_string = ""
         # Lose parameters
-        path = path.split("?",1)[0]
         path = path.split("#",1)[0]
+        path = path.split("?",1)
+        try:
+            self.query_string = path[1]
+        except:
+            pass
+        path = path[0]
         path = os.path.abspath(path)
         # CGI?
         if path.startswith("/cgi-bin/"):
             if os.path.isfile(self.server.PUBLIC_DIR + path):
+                self.filename = os.path.basename(self.server.PUBLIC_DIR + path)
                 self.code = 200
                 self.cgi = True
                 return self.server.PUBLIC_DIR + path
@@ -281,7 +316,7 @@ class HttpHandler():
             self.code = 200
             return path
         # Not found
-        self.server.close_connection = True
+        #self.server.close_connection = True
         #self.write_code(404)
         self.code = 404
 
@@ -329,6 +364,8 @@ class HttpHandler():
             dt.year, dt.hour, dt.minute, dt.second)
 
 class ForkingServer():
+    version_string = __version__
+    name = "Bistro"
 
     def __init__(self, config_filename = "server.conf"):
 
@@ -342,7 +379,7 @@ class ForkingServer():
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.PORT = 8000
         self.socket.bind((self.HOST, self.PORT))
-        self.socket.listen(5) # Test queue
+        self.socket.listen(1024) # Test queue
 
     def configure(self, filepath):
         # Defaults:
@@ -432,8 +469,10 @@ class ForkingServer():
             while True:
                 #print "Accepting connections..."
                 if self.close_connection:
+                        self.socket.close()
                         self.conn.close()
                         print("{0}:{1} - - [{2}] Closed connection -".format(self.handler.addr[0], self.handler.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+                        print("")
                         #connected = False
                         #print("Handler {0} - - [{1}] Closed".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()))) 
                         os._exit(0)
