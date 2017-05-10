@@ -8,7 +8,7 @@ for i in range(0,20):
     body += "<li>" + str(i) +"</li>\r\n"
 body += "</ul>\r\n"
 body += "<p>" + str(os.environ.copy()) + "</p>\r\n"
-if os.environ["REQUEST_METHOD"]=="POST" and os.environ["CONTENT_LENGTH"]!="0": body += "<p>" +fileinput.input()[0]+ "</p>\r\n"
+if os.environ["REQUEST_METHOD"]=="POST" and os.environ["CONTENT_LENGTH"]!="0" and os.environ["CONTENT_LENGTH"]!="" : body += "<p>" +fileinput.input()[0]+ "</p>\r\n"
 
 size = len(body.encode('utf-8'))
 

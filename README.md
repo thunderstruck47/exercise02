@@ -18,6 +18,7 @@ python2 server.py
 
 ### Features
 
+* Introduced basic CGI script handling ("www/cgi-bin" folder)
 * Speaks (partially) HTTP/0.9, HTTP/1.0 and HTTP/1.1
 * Supports GET, HEAD and POST(ignores parameters) for HTTP/1.0 and HTTP/1.1
 * Servers static files only (no WSGI)
@@ -42,7 +43,9 @@ index_files = index.html index.htm
 
 * ~~Handle defunct child processes~~
 * ~~HTTP/1.1 and HTTP/0.9 support~~
-* CGI-compatible
+* ~~CGI-compatible~~
+* Non-blocking IO version
+* Asynch IO version
 * Directory file listing page
 * Proper documentation
 * Proper logging

@@ -88,7 +88,6 @@ class HttpHandler():
                 self.wfile.close()
                 print("{0}:{1} - - [{2}] Client disconnected -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                 return
-            print self.code
             if self.code == 200:
                 self.write_code(200)
                 if not self.cgi: self.handle_request(self.method,self.path,self.version)
