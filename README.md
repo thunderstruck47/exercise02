@@ -45,8 +45,6 @@ index_files = index.html index.htm
 * ~~HTTP/1.1 and HTTP/0.9 support~~
 * ~~CGI-compatible~~
 * Non-blocking version (using select)
-* Async version
-* Directory file listing page
-* Proper documentation
-* Proper logging
+* Async version (using gevent)
+* Advanced documentation
 * Automated tests
