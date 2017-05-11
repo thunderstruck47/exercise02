@@ -133,7 +133,7 @@ class HttpHandler():
             self.m_body = request[1]
             size = len(self.m_body.encode('utf-8'))
             if size < self.content_length:
-                self.m_body = self.m_body + self.conn.recv(self.content_length - size).decode()
+                self.m_body = self.m_body + self.server.conn.recv(self.content_length - size).decode()
 
     def parse_header(self, line):
         try:
