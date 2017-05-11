@@ -10,7 +10,7 @@ body += "</ul>\r\n"
 body += "<p>" + str(os.environ.copy()) + "</p>\r\n"
 if os.environ["REQUEST_METHOD"]=="POST" and os.environ["CONTENT_LENGTH"]!="0" and os.environ["CONTENT_LENGTH"]!="" :body += "<p>" +fileinput.input()[0]+ "</p>\r\n"
 
-size = len(body.encode('utf-8')) + 1
+size = len(body.encode('utf-8')) + 1 # Chrome interupts connection if no empty byte
 print("Content-Type: text/html",end = "\r\n")
 print("Content-Length: {0}".format(size))
 print(end = "\r\n")

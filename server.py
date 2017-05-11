@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python
 __version__ = "0.0.2"
 
 # Standard modules
@@ -91,6 +91,7 @@ class HttpHandler():
 
     def parse_request(self):
         self.content_length = ""
+        self.content_type = ""
         self.method = ""
         self.path = ""
         self.status_line_string = ""
@@ -110,7 +111,7 @@ class HttpHandler():
                     if version == "HTTP/1.1" : self.server.close_connection = False
                     if version == "HTTP/1.0" : self.server.close_connection = True
                     for line in self.m_head[1:]:
-                        self.should_keep_alive(line)
+                        self.parse_header(line)
                     self.method = method
                     self.version = version
                     self.path = self.handle_path(path)
@@ -130,25 +131,22 @@ class HttpHandler():
         # What if request contains only head
         if len(request) == 2 and self.method == "POST": #Prepare body
             self.m_body = request[1]
-            size = len(body.encode('utf-8'))
+            size = len(self.m_body.encode('utf-8'))
             if size < self.content_length:
                 self.m_body = self.m_body + self.conn.recv(self.content_length - size).decode()
 
-    def should_keep_alive(self, line):
+    def parse_header(self, line):
         try:
-            field, value = [x.strip() for x in line.split(":")]
+            field, value = [x.strip() for x in line.split(":",1)]
             if field.lower() == "connection":
                 if value.lower() == "close":
                     self.server.close_connection = True
-                    #print "Connection : close"
-                    return True
                 elif value.lower() == "keep-alive":
                     self.server.close_connection = False
-                    #print "Connection : keep-alive"
-                    return True
             elif field.lower() == "content-length":
                 self.content_length = int(value)
-            return False
+            elif field.lower() == "content-type":
+                self.content_type = str(value)
         except:
             pass
             # Should be able to handle invalid headers
@@ -201,6 +199,7 @@ class HttpHandler():
         env["PATH_INFO"] = path
         env["SCRIPT_NAME"] = self.filename
         env["CONTENT_LENGTH"] = str(self.content_length)
+        env["CONTENT_TYPE"] = self.content_type
 
         try:
             process = subprocess.Popen(["./" + path], stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, env = env)
@@ -208,7 +207,7 @@ class HttpHandler():
             else: stdin = ""
             (output, err) = process.communicate(stdin)
             exit_code = process.wait()
-            print err
+            #print(err)
             if exit_code == 1 or err: raise Exception
             self.write_code(self.code)
             self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())).encode())
