@@ -58,10 +58,8 @@ class HttpHandler():
             self.server.close_connection = False
         elif self.server.HTTP_VERSION == 1.0:
             self.version = "HTTP/1.0"
-        try:
-            self.handle_conn()
-        except socket.error as e:
-            print("Socket error")
+        # Go
+        self.handle_conn()
 
     # Handles current connection
     def handle_conn(self):
@@ -101,7 +99,7 @@ class HttpHandler():
         request = request.decode().split("\r\n\r\n",1)
         # Check for body
         if len(request) >= 1: #Only header
-            #if request[0] == "": return
+            if request[0] == "": return
             self.m_head = [x.strip() for x in request[0].split("\r\n")] # List of header fields
             self.status_line_string = self.m_head[0]
             self.status_line =  self.status_line_string.split()
@@ -448,12 +446,10 @@ class ForkingServer(BaseServer):
             while True:
                 #print "Accepting connections..."
                 if self.close_connection:
-                        #self.conn.shutdown(SHUT_RDWR)
                         self.conn.close()
                         print("{0}:{1} - - [{2}] Closed connection -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                         print("")
-                        #connected = False
-                        #print("Handler {0} - - [{1}] Closed".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()))) 
+                        #print("Handler {0} - - [{1}] Closed".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                         os._exit(0)
                 if not self.connected:
                     #print("Handler {0} - - [{1}] Accepting connections...".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
