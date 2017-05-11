@@ -351,9 +351,8 @@ class BaseServer():
         # Set up a socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.PORT = 8000
         self.socket.bind((self.HOST, self.PORT))
-        self.socket.listen(1024) # Test queue
+        self.socket.listen(1024) # Should be set in confing / Test it
 
     def configure(self, filepath):
         # Defaults:
@@ -365,41 +364,51 @@ class BaseServer():
         self.INDEX_FILES = ["index.html","index.htm"]
         self.LOGGING = True
         self.LOG_FILE = "server.log"
-        # Python 3.^
-        if sys.version_info > (3, 0):
-            config = configparser.ConfigParser()
-            config.read(filepath)
-            for key in config["server"]:
-                try:
-                    value = config["server"][key]
-                    if key.upper() == "PORT" or key.upper() == "REQ_BUFFSIZE": value = int(value)
-                    elif key.upper() == "HTTP_VERSION": value = float(config["server"][key])
-                    elif key.upper() == "INDEX_FILES": value = config["server"][key].split()
-                    else: value = str(config["server"][key])
-                    setattr(self, key.upper(), value)
-                    #print(getattr(self, key.upper()))
-                except ValueError:
-                    raise
-        # Python 2.^
-        else:
-            try:
+
+        if os.path.isfile(filepath):
+            # Python 3.^
+            if sys.version_info > (3, 0):
+                config = configparser.ConfigParser()
+                config.read(filepath)
+                if "server" in config:
+                    for key in config["server"]:
+                        try:
+                            value = config["server"][key]
+                            if key.upper() == "PORT" or key.upper() == "REQ_BUFFSIZE": value = int(value)
+                            elif key.upper() == "HTTP_VERSION": value = float(config["server"][key])
+                            elif key.upper() == "INDEX_FILES": value = config["server"][key].split()
+                            else: value = str(config["server"][key])
+                            setattr(self, key.upper(), value)
+                            #print(getattr(self, key.upper()))
+                        except ValueError:
+                            raise
+                else:
+                    print("* Wrong or incorrect configuration")
+                    print("* Assuming default settings")
+            # Python 2.^
+            else:
                 with open(filepath,"rb") as f:
                     config = ConfigParser.ConfigParser()
                     config.readfp(f)
-                    for pair in config.items("server"):
-                        try:
-                            key, value = pair[0], pair[1]
-                            if key.upper() in ["PORT", "REQ_BUFFSIZE"]: value = int(value)
-                            elif key.upper() == "HTTP_VERSION": value = float(value)
-                            elif key.upper() == "INDEX_FILES": value = value.split()
-                            elif key.upper() == "LOGGING": value = bool(value)
-                            setattr(self, pair[0].upper(), value)
-                        except ValueError:
-                            raise
-            except IOError:
-                # Should create a new config file
-                print("* Missing configuration file")
-                print("* Assuming default settings")
+                    try:
+                        for pair in config.items("server"):
+                            try:
+                                key, value = pair[0], pair[1]
+                                if key.upper() in ["PORT", "REQ_BUFFSIZE"]: value = int(value)
+                                elif key.upper() == "HTTP_VERSION": value = float(value)
+                                elif key.upper() == "INDEX_FILES": value = value.split()
+                                elif key.upper() == "LOGGING": value = bool(value)
+                                setattr(self, pair[0].upper(), value)
+                            except ValueError:
+                                raise
+                    except ConfigParser.NoSectionError:
+                        print("* Wrong or incorrect configuration")
+                        print("* Assuming default settings")
+
+        else:
+            # Should create a new config file
+            print("* Missing configuration file")
+            print("* Assuming default settings")
 
     def log(self, message):
         # To be implemented
@@ -487,7 +496,8 @@ class ForkingServer(BaseServer):
                 return
 
 class NonBlockingServer(BaseServer):
-    pass
+    def __init__(self):
+        self.socket.setnonblocking(0)
 
 if __name__ == "__main__":
     server = ForkingServer("server.conf")
