@@ -13,11 +13,16 @@ import datetime
 import time
 import shutil
 
-# Import correct config parser
+# Non-blocking IO
+import select
+
+# Import correct config parser and queue
 if sys.version_info > (3, 0):
     import configparser
+    import queue as queue
 else:
     import ConfigParser
+    import Queue as queue
 
 # Community modules (optional)
 try:
@@ -52,6 +57,7 @@ class HttpHandler():
     def __init__(self, server):
         self.server = server
         self.server.close_connection = True
+        self.rfile = self.server.conn.makefile('rb', -1)
         self.wfile = self.server.conn.makefile('wb', 0)
         if self.server.HTTP_VERSION == 1.1:
             self.version = "HTTP/1.1"
@@ -68,8 +74,11 @@ class HttpHandler():
         self.cgi = None
         try:
             self.parse_request()
+
+            # If an empty byte was sent: close the connection
             if not self.code:
                 self.server.close_connection = True
+                self.rfile.close()
                 self.wfile.close()
                 print("{0}:{1} - - [{2}] Client disconnected -".format(self.server.addr[0], self.server.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                 return
@@ -81,7 +90,9 @@ class HttpHandler():
                 self.wfile.write(b"Content-Length: 0\r\n\r\n")
             # Flush and finalize file
             self.wfile.flush()
-            if self.server.close_connection: self.wfile.close()
+            if self.server.close_connection:
+                self.rfile.close()
+                self.wfile.close()
             # Logging
             if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.server.addr[0], self.server.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), self.status_line_string, self.code))
         except socket.error as e:
@@ -90,50 +101,61 @@ class HttpHandler():
             return
 
     def parse_request(self):
-        self.content_length = ""
+        self.content_length = 0
         self.content_type = ""
         self.method = ""
         self.path = ""
-        self.status_line_string = ""
         self.m_body = None
-        request = self.server.conn.recv(self.server.REQ_BUFFSIZE) # Needs fixing
-        request = request.decode().split("\r\n\r\n",1)
-        # Check for body
-        if len(request) >= 1: #Only header
-            if request[0] == "": return
-            self.m_head = [x.strip() for x in request[0].split("\r\n")] # List of header fields
-            self.status_line_string = self.m_head[0]
-            self.status_line =  self.status_line_string.split()
-            # Long method
-            if len(self.status_line) == 3: # HTTP/1.0 AND HTTP/1.1
-                method, path, version = self.status_line
-                if self.valid_http_method(method) and self.valid_http_version(version):
-                    if version == "HTTP/1.1" : self.server.close_connection = False
-                    if version == "HTTP/1.0" : self.server.close_connection = True
-                    for line in self.m_head[1:]:
-                        self.parse_header(line)
-                    self.method = method
-                    self.version = version
-                    self.path = self.handle_path(path)
-            elif len(self.status_line) == 2: #HTTP/0.9
-                method, path = self.status_line
-                self.version = "HTTP/0.9"
-                self.server.close_connection = True
-                if method == "GET":
-                    self.method = method
-                    self.path = self.handle_path(path)
-                else:
-                    self.code = 400
+
+        # Preparing message status line
+        self.status_line_string = self.rfile.readline(self.server.REQ_BUFFSIZE + 1).decode()
+        if len(self.status_line_string) > self.server.REQ_BUFFSIZE: # Rquest URI too long
+            self.code = 414
+            return
+        elif self.status_line_string == "": # Client sent empty request: terminate connection
+            return
+
+        # Preparing message headers
+        self.m_head = []
+        while True:
+            line = self.rfile.readline(self.server.REQ_BUFFSIZE) # Too long?
+            self.m_head.append(line.rstrip(b"\r\n").decode())
+            if line == b"\r\n": break
+
+        # Processing
+        self.status_line =  self.status_line_string.split()
+
+        # HTTP/1.0 and HTTP/1.1
+        if len(self.status_line) == 3:
+            method, path, version = self.status_line
+            if self.valid_http_method(method) and self.valid_http_version(version):
+                if version == "HTTP/1.1" : self.server.close_connection = False
+                if version == "HTTP/1.0" : self.server.close_connection = True
+                for line in self.m_head:
+                    self.parse_header(line)
+                self.method = method
+                self.version = version
+                self.path = self.handle_path(path)
+
+        # HTTP/0.9
+        elif len(self.status_line) == 2:
+            method, path = self.status_line
+            self.version = "HTTP/0.9"
+            self.server.close_connection = True
+            if method == "GET":
+                self.method = method
+                self.path = self.handle_path(path)
             else:
-                self.server.close_connection = True
                 self.code = 400
-        # Needs caution
-        # What if request contains only head
-        if len(request) == 2 and self.method == "POST": #Prepare body
-            self.m_body = request[1]
-            size = len(self.m_body.encode('utf-8'))
-            if size < self.content_length:
-                self.m_body = self.m_body + self.server.conn.recv(self.content_length - size).decode()
+
+        # Invalid request
+        else:
+            self.server.close_connection = True
+            self.code = 400
+
+        # If POST and message body
+        if self.method == "POST" and self.content_length > 0: #Prepare body
+            self.m_body = self.rfile.read(self.content_length)
 
     def parse_header(self, line):
         try:
@@ -203,12 +225,13 @@ class HttpHandler():
 
         try:
             process = subprocess.Popen(["./" + path], stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, env = env)
-            if self.m_body: stdin = self.m_body.encode()
+            if self.m_body: stdin = self.m_body
             else: stdin = ""
             (output, err) = process.communicate(stdin)
             exit_code = process.wait()
-            #print(err)
-            if exit_code == 1 or err: raise Exception
+            if exit_code == 1 or err:
+                print("ERROR calling \"{0}\":\r\n {1}".format(env["SCRIPT_NAME"],err.decode()))
+                raise Exception
             self.write_code(self.code)
             self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())).encode())
             self.wfile.write("Server: {0}\r\n".format("Bistro/" + __version__).encode())
@@ -337,7 +360,7 @@ class HttpHandler():
         return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
             dt.year, dt.hour, dt.minute, dt.second)
 
-class BaseServer():
+class BaseServer(object):
     version_string = __version__
     name = "Bistro"
 
@@ -358,7 +381,7 @@ class BaseServer():
         # Defaults:
         self.HOST = ""
         self.PORT = 8000
-        self.REQ_BUFFSIZE = 4096
+        self.REQ_BUFFSIZE = 65536
         self.PUBLIC_DIR = "www"
         self.HTTP_VERSION = 1.0
         self.INDEX_FILES = ["index.html","index.htm"]
@@ -415,7 +438,7 @@ class BaseServer():
         pass
 
     def serve_single(self):
-        print("* Waiting for a single HHTTP request at port {0}".format(self.PORT))
+        print("* Waiting for a single HTTP request at port {0}".format(self.PORT))
         self.conn, self.addr = self.socket.accept()
         try:
             if self.conn: self.handler = HttpHandler( self)
@@ -497,10 +520,47 @@ class ForkingServer(BaseServer):
 
 class NonBlockingServer(BaseServer):
     def __init__(self):
-        self.socket.setnonblocking(0)
+        # Initializing base server config
+        super(self.__class__, self).__init__()
+
+        # Set socket to non-blocking
+        #self.socket.setblocking(0)
+
+        # Sockets from which we expect to read
+        inputs = [self.socket]
+
+        # Sockets to which we expect to write
+        outputs = []
+
+        # Outgoing message queues (socket:Queue)
+        message_queues = {}
+
+    def serve_single(self):
+        print("* Waiting for a single HTTP request at port {0}".format(self.PORT))
+        conn, addr = self.socket.accept()
+        rfile = conn.makefile("rb",-1)
+        messege = b""
+        while True:
+            data = rfile.readline(65537)
+            print(data)
+            messege += data
+            if data == b"\r\n": break
+        print(messege)
+        data = rfile.read(3)
+        print(data)
+
+    def serve_persistent(self):
+        while inputs:
+            readable, writable, exceptional = select.select(inputs, outputs, message_queues)
+            for s in readable:
+                if s is self.socket:
+                    conn, addr = self.accept()
+                    conn.setblocking(0)
+                    inputs.append(conn)
 
 if __name__ == "__main__":
     server = ForkingServer("server.conf")
+    #server = NonBlockingServer()
     #server.serve_single()
     #server._serve_non_persistent()
     server.serve_persistent()
