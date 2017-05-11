@@ -4,7 +4,7 @@
 
 ## Create CSV file
 today=`date '+%Y_%m_%d__%H_%M_%S'`;
-duration="60s"
+duration="10s"
 filename="test0_$duration-$today"
 
 ## File headers
@@ -25,7 +25,7 @@ sleep 1s
 echo "1,$rpsPC,$rpsNPC" >> data/$filename.csv
 
 ## REST:
-for ((x=10; x<=1000; x+=10));
+for ((x=100; x<=1000; x+=100));
 do
     ## RPS persistent (keep-alive):
     rpsPC=`ab -c $x -t $duration -k http://0.0.0.0:8000/ | grep 'Requests per second' | awk '{print $4}'`;

@@ -40,6 +40,7 @@ class HttpHandler():
         400: "Bad Request",
         403: "Forbidden",
         404: "Not Found",
+        414: "Request URI Too Long",
         500: "Internal Server Error",
         501: "Not Implemented",
         505: "HTTP Version Not Supported"
@@ -109,6 +110,7 @@ class HttpHandler():
 
         # Preparing message status line
         self.status_line_string = self.rfile.readline(self.server.REQ_BUFFSIZE + 1).decode()
+        self.status_line_string = self.status_line_string.rstrip("\r\n")
         if len(self.status_line_string) > self.server.REQ_BUFFSIZE: # Rquest URI too long
             self.code = 414
             return
