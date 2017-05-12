@@ -303,10 +303,6 @@ class HttpHandler():
                     path = index
                     break
             else:
-                # Is a dir
-                #if os.path.dirname(path) == "www/uploads":
-                #    code = 201
-                #    return path
                 self.code = 403
                 return
         if os.path.isfile(path):
@@ -369,7 +365,7 @@ class BaseServer(object):
     def __init__(self, config_filename = "server.conf"):
 
         # Reading settings from config file
-        # If setting is missing, replace with default
+        # CAUTION path/filename?
         self.configure(config_filename)
         # Setting up the HTTP handler
         self.handler = HttpHandler
@@ -479,9 +475,9 @@ class ForkingServer(BaseServer):
             while True:
                 #print "Accepting connections..."
                 if self.close_connection:
-                        self.conn.close()
-                        print("{0}:{1} - - [{2}] Closed connection -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-                        print("")
+                        self.shutdown_connection()
+                        #print("{0}:{1} - - [{2}] Closed connection -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+                        #print("")
                         #print("Handler {0} - - [{1}] Closed".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                         os._exit(0)
                 if not self.connected:
@@ -497,15 +493,16 @@ class ForkingServer(BaseServer):
                     if self.conn:
                         pid = os.fork() # Needs error handling
                         if pid != 0: # Parent
+                            # close the file descriptor
                             self.conn.close()
                         else:
                             self.socket.close()
-                            print("{0}:{1} - - [{2}] Connecting... -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()) ))
+                            #print("{0}:{1} - - [{2}] Connecting... -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()) ))
                             #self.close_connection = True
                             self.connected = True
                             self.handler = HttpHandler(self)
                 else:
-                    print("{0}:{1} - - [{2}] Already connected -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+                    #print("{0}:{1} - - [{2}] Already connected -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                     self.handler.handle_conn()
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
@@ -520,49 +517,91 @@ class ForkingServer(BaseServer):
             if pid == 0:
                 return
 
+    def shutdown_connection(self):
+        try:
+            # explicit shutdown
+            self.conn.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        self.conn.close()
+
 class NonBlockingServer(BaseServer):
     def __init__(self):
         # Initializing base server config
         super(self.__class__, self).__init__()
 
         # Set socket to non-blocking
-        #self.socket.setblocking(0)
+        self.socket.setblocking(0)
 
         # Sockets from which we expect to read
-        inputs = [self.socket]
+        self.inputs = [self.socket]
 
         # Sockets to which we expect to write
-        outputs = []
+        self.outputs = []
 
         # Outgoing message queues (socket:Queue)
-        message_queues = {}
+        self.message_queues = {}
 
-    def serve_single(self):
-        print("* Waiting for a single HTTP request at port {0}".format(self.PORT))
-        conn, addr = self.socket.accept()
-        rfile = conn.makefile("rb",-1)
-        messege = b""
-        while True:
-            data = rfile.readline(65537)
-            print(data)
-            messege += data
-            if data == b"\r\n": break
-        print(messege)
-        data = rfile.read(3)
-        print(data)
+    #def serve_single(self):
+    #    print("* Waiting for a single HTTP request at port {0}".format(self.PORT))
+    #    conn, addr = self.socket.accept()
+    #    rfile = conn.makefile("rb",-1)
+    #    messege = b""
+    #    while True:
+    #        data = rfile.readline(65537)
+    #        print(data)
+    #        messege += data
+    #        if data == b"\r\n": break
+    #    print(messege)
+    #    data = rfile.read(3)
+    #    print(data)
 
     def serve_persistent(self):
-        while inputs:
-            readable, writable, exceptional = select.select(inputs, outputs, message_queues)
+        while self.inputs:
+            readable, writable, exceptional = select.select(self.inputs, self.outputs, self.message_queues)
             for s in readable:
                 if s is self.socket:
-                    conn, addr = self.accept()
+                    # Server is ready to accept a connection
+                    conn, addr = self.socket.accept()
                     conn.setblocking(0)
-                    inputs.append(conn)
+                    self.inputs.append(conn)
+
+                    # Give the connection a queue for data we want to send
+                    self.message_queues[conn] = queue.Queue()
+                else:
+                    data = s.recv(1024)
+                    if data:
+                        self.message_queues[s].put("output")
+                        if s not in self.outputs:
+                            self.outputs.append(s)
+                    else:
+                        # closing connection
+                        if s in self.outputs:
+                            self.outputs.remove(s)
+                        self.inputs.remove(s)
+                        s.close()
+
+                        # remove message queue
+                        del self.message_queues[s]
+            for s in writable:
+                try:
+                    next_msg = self.message_queues[s].get_nowait()
+                except queue.Empty:
+                    self.outputs.remove(s)
+                else:
+                    s.send(next_msg)
+            for s in exceptional:
+                self.inputs.remove(s)
+                if s in self.outputs:
+                    self.outputs.removev(s)
+                s.close()
+
+                del self.message_queues[s]
+
 
 if __name__ == "__main__":
-    server = ForkingServer("server.conf")
-    #server = NonBlockingServer()
+    #server = ForkingServer()
+    server = NonBlockingServer()
     #server.serve_single()
     #server._serve_non_persistent()
     server.serve_persistent()
