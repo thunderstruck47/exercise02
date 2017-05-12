@@ -383,7 +383,10 @@ class BaseServer(object):
     def configure(self, filepath):
         # Defaults:
         self.HOST = ""
-        self.PORT = 8000
+        try:
+            self.PORT = 8000
+        except:
+            pass
         self.REQ_BUFFSIZE = 65536
         self.PUBLIC_DIR = "www"
         self.HTTP_VERSION = 1.0
@@ -525,9 +528,9 @@ class ForkingServer(BaseServer):
                 return
 
 class NonBlockingServer(BaseServer):
-    def __init__(self):
+    def __init__(self, config = "server.conf"):
         # Initializing base server config
-        super(self.__class__, self).__init__()
+        super(self.__class__, self).__init__(config)
 
         # Set socket to non-blocking
         self.socket.setblocking(0)
@@ -538,41 +541,69 @@ class NonBlockingServer(BaseServer):
         # Sockets to which we expect to write
         self.outputs = []
 
-        # Outgoing message queues (socket:Queue)
+        # Current handlers queue (HttpHandler:Queue)
         self.handlers = {}
 
     def serve_persistent(self):
+        print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
         try:
             while self.inputs:
+
+                # Wait for at least one socket to be ready for processing
+                # Needs error handling (Keyboard Interrupt)
                 readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs)
+
+                # Handle inputs
                 for s in readable:
                     if s is self.socket:
                         # Server is ready to accept a connection
                         conn, addr = self.socket.accept()
+                        # Set to non-blocking
                         conn.setblocking(0)
                         self.inputs.append(conn)
 
-                        # Give the connection a queue for data we want to send
+                        # Give the connection a queue for the handlers
                         self.handlers[conn] = queue.Queue()
-                    else:
-                        handler = HttpHandler(s,self)
-                        if handler.parse_request():
-                            self.handlers[s].put(handler)
-                            if s not in self.outputs:
-                                self.outputs.append(s)
-                        else:
+                    else: # Read from connection
+
+                        # Creates a new HttpHandler object.
+                        # WARNING: Slows down persistent connections.
+                        # Needs to be managed differently.
+                        try:
+                            handler = HttpHandler(s,self)
+
+                            # Check if request was parsed successfuly
+                            if handler.parse_request():
+
+                                # Add handler to queue
+                                self.handlers[s].put(handler)
+                                if s not in self.outputs:
+                                    self.outputs.append(s)
+                            else:
+                                self.clear(s)
+                                if s in writable:
+                                    writable.remove(s)
+                        except:
                             self.clear(s)
+                # Handle outputs
                 for s in writable:
                     try:
                         next_handler = self.handlers[s].get_nowait()
-                    except queue.Empty:
+                    except (queue.Empty):
                         self.outputs.remove(s)
+                    except (KeyError):
+                        pass
                     else:
                         next_handler.handle_one_request()
                         if next_handler.close:
                             self.clear(s)
+                            if s in self.inputs:
+                                self.inputs.remove(s)
+
+                # Handle "exceptional conditions"
                 for s in exceptional:
                     self.clear(s)
+
         except KeyboardInterrupt:
             self.clear(self.socket)
 
@@ -588,7 +619,5 @@ class NonBlockingServer(BaseServer):
 if __name__ == "__main__":
     server = ForkingServer()
     #server = NonBlockingServer()
-    #server.serve_single()
-    #server._serve_non_persistent()
     server.serve_persistent()
     print("Bye")
