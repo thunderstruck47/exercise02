@@ -55,33 +55,44 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self, server):
+    def __init__(self, conn, server):
         self.server = server
-        self.server.close_connection = True
-        self.rfile = self.server.conn.makefile('rb', -1)
-        self.wfile = self.server.conn.makefile('wb', 0)
+        self.conn = conn
+        self.addr = conn.getpeername()
+        self.close = False
+        self.rfile = self.conn.makefile('rb', -1)
+        self.wfile = self.conn.makefile('wb', 0)
         if self.server.HTTP_VERSION == 1.1:
             self.version = "HTTP/1.1"
-            self.server.close_connection = False
         elif self.server.HTTP_VERSION == 1.0:
             self.version = "HTTP/1.0"
         # Go
-        self.handle_conn()
+        #try:
+        #    self.handle_connection()
+        #finally:
+        #    self.finalize()
 
+    def finalize(self):
+        if not self.wfile.closed:
+            try:
+                self.wfile.flush()
+            except:
+                pass
+            self.wfile.close()
+            self.rfile.close()
+
+    def handle_connection(self):
+        while not self.close:
+            self.handle_one_request()
     # Handles current connection
-    def handle_conn(self):
-        request = None
-        self.code = None
-        self.cgi = None
+    def handle_one_request(self):
+        #self.cgi = None
         try:
-            self.parse_request()
-
+            #self.parse_request()
             # If an empty byte was sent: close the connection
             if not self.code:
-                self.server.close_connection = True
-                self.rfile.close()
-                self.wfile.close()
-                print("{0}:{1} - - [{2}] Client disconnected -".format(self.server.addr[0], self.server.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+                self.close = True
+                print("{0}:{1} - - [{2}] Client disconnected -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
                 return
             if self.code == 200:
                 if not self.cgi: self.handle_request(self.method,self.path,self.version)
@@ -89,17 +100,12 @@ class HttpHandler():
             else:
                 self.write_code(self.code)
                 self.wfile.write(b"Content-Length: 0\r\n\r\n")
-            # Flush and finalize file
-            self.wfile.flush()
-            if self.server.close_connection:
-                self.rfile.close()
-                self.wfile.close()
             # Logging
-            if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.server.addr[0], self.server.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), self.status_line_string, self.code))
+            if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), self.status_line_string, self.code))
         except socket.error as e:
+            self.close = True
             if e.errno == errno.EPIPE:
-                print("{0}:{1} - - [{2}] Connection interrupted (Broken pipe) -".format(self.server.addr[0], self.server.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-            return
+                print("{0}:{1} - - [{2}] Connection interrupted (Broken pipe) -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
 
     def parse_request(self):
         self.content_length = 0
@@ -107,16 +113,17 @@ class HttpHandler():
         self.method = ""
         self.path = ""
         self.m_body = None
-
+        self.code = None
+        self.cgi = None
         # Preparing message status line
         self.status_line_string = self.rfile.readline(self.server.REQ_BUFFSIZE + 1).decode()
         self.status_line_string = self.status_line_string.rstrip("\r\n")
         if len(self.status_line_string) > self.server.REQ_BUFFSIZE: # Rquest URI too long
             self.code = 414
-            return
+            return True
         elif self.status_line_string == "": # Client sent empty request: terminate connection
-            return
-
+            return False
+        print(self.status_line_string)
         # Preparing message headers
         self.m_head = []
         while True:
@@ -131,8 +138,8 @@ class HttpHandler():
         if len(self.status_line) == 3:
             method, path, version = self.status_line
             if self.valid_http_method(method) and self.valid_http_version(version):
-                if version == "HTTP/1.1" : self.server.close_connection = False
-                if version == "HTTP/1.0" : self.server.close_connection = True
+                if version == "HTTP/1.1" : self.close = False
+                if version == "HTTP/1.0" : self.close = True
                 for line in self.m_head:
                     self.parse_header(line)
                 self.method = method
@@ -143,7 +150,7 @@ class HttpHandler():
         elif len(self.status_line) == 2:
             method, path = self.status_line
             self.version = "HTTP/0.9"
-            self.server.close_connection = True
+            self.close = True
             if method == "GET":
                 self.method = method
                 self.path = self.handle_path(path)
@@ -152,21 +159,22 @@ class HttpHandler():
 
         # Invalid request
         else:
-            self.server.close_connection = True
+            self.close = True
             self.code = 400
 
         # If POST and message body
         if self.method == "POST" and self.content_length > 0: #Prepare body
             self.m_body = self.rfile.read(self.content_length)
+        return True
 
     def parse_header(self, line):
         try:
             field, value = [x.strip() for x in line.split(":",1)]
             if field.lower() == "connection":
                 if value.lower() == "close":
-                    self.server.close_connection = True
+                    self.close = True
                 elif value.lower() == "keep-alive":
-                    self.server.close_connection = False
+                    self.close = False
             elif field.lower() == "content-length":
                 self.content_length = int(value)
             elif field.lower() == "content-type":
@@ -177,7 +185,6 @@ class HttpHandler():
 
     def valid_http_version(self,version):
         if version[:5] != "HTTP/":
-            #self.write_code(400)
             self.code = 400
             return False
         try:
@@ -189,17 +196,15 @@ class HttpHandler():
                 raise ValueError
 
         except(ValueError, IndexError):
-            self.server.close_connection = True
+            self.close = True
             self.code = 400
-            #self.write_code(400)
             return False
         if version_number[0] > 1: # HTTP/2+
             self.code = 505
-            #self.write_code(505) # Not supported
             return False
         if version != "HTTP/1.1" and version != "HTTP/1.0":
             self.code = 505
-            self.server.close_connection = True
+            self.close = True
             return False
         return True
 
@@ -217,8 +222,8 @@ class HttpHandler():
         env["SERVER_PROTOCOL"] = self.version
         env["SERVER_PORT"] = str(self.server.PORT)
         env["REQUEST_METHOD"] = self.method
-        env["REMOTE_ADDR"] = str(self.server.addr[0])
-        env["REMOTE_PORT"] = str(self.server.addr[1])
+        env["REMOTE_ADDR"] = str(self.addr[0])
+        env["REMOTE_PORT"] = str(self.addr[1])
         env["QUERY_STRING"] = self.query_string
         env["PATH_INFO"] = path
         env["SCRIPT_NAME"] = self.filename
@@ -273,7 +278,7 @@ class HttpHandler():
         else: self.wfile.write("{0} {1}\r\n".format(code, self.responses[code]).encode())
         #self.code = code
         if self.version != "HTTP/0.9":
-            if self.server.close_connection: self.wfile.write("Connection: close\r\n".encode())
+            if self.close: self.wfile.write("Connection: close\r\n".encode())
             else: self.wfile.write("Connection: keep-alive\r\n".encode()) # HTTP 1.0
 
 
@@ -441,8 +446,17 @@ class BaseServer(object):
         try:
             if self.conn: self.handler = HttpHandler( self)
         finally:
-            self.conn.close()
+            self.shutdown_connection()
             self.socket.close()
+
+    def shutdown_connection(self, conn):
+        try:
+            # explicit shutdown
+            conn.shutdown(socket.SHUT_WR)
+        except OSError:
+            pass
+        conn.close()
+
 
 class ForkingServer(BaseServer):
     # Needs fixing
@@ -467,43 +481,36 @@ class ForkingServer(BaseServer):
 
     def serve_persistent(self):
         self.conn = None
-        self.connected = False
-        self.close_connection = False
+        #self.connected = False
+        #self.close_connection = False
         print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
         signal.signal(signal.SIGCHLD, self.signal_handler)
         try:
             while True:
-                #print "Accepting connections..."
-                if self.close_connection:
-                        self.shutdown_connection()
-                        #print("{0}:{1} - - [{2}] Closed connection -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-                        #print("")
-                        #print("Handler {0} - - [{1}] Closed".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
+                try:
+                    self.conn, self.addr = self.socket.accept()
+                except IOError as e:
+                    code, msg = e.args
+                    if code == errno.EINTR:
+                        continue
+                    else:
+                        raise
+                if self.conn:
+                    pid = os.fork() # Needs error handling
+                    if pid != 0: # Parent
+                        # close the file descriptor
+                        self.conn.close()
+                    else:
+                        self.socket.close()
+                        self.handler = HttpHandler(self.conn,self)
+                        try:
+                            while not self.handler.close:
+                                self.handler.parse_request()
+                                self.handler.handle_one_request()
+                        finally:
+                            self.handler.finalize()
+                        self.shutdown_connection(self.conn)
                         os._exit(0)
-                if not self.connected:
-                    #print("Handler {0} - - [{1}] Accepting connections...".format(os.getpid(), time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-                    try:
-                        self.conn, self.addr = self.socket.accept()
-                    except IOError as e:
-                        code, msg = e.args
-                        if code == errno.EINTR:
-                            continue
-                        else:
-                            raise
-                    if self.conn:
-                        pid = os.fork() # Needs error handling
-                        if pid != 0: # Parent
-                            # close the file descriptor
-                            self.conn.close()
-                        else:
-                            self.socket.close()
-                            #print("{0}:{1} - - [{2}] Connecting... -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()) ))
-                            #self.close_connection = True
-                            self.connected = True
-                            self.handler = HttpHandler(self)
-                else:
-                    #print("{0}:{1} - - [{2}] Already connected -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-                    self.handler.handle_conn()
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
             self.socket.close()
@@ -516,14 +523,6 @@ class ForkingServer(BaseServer):
                 return
             if pid == 0:
                 return
-
-    def shutdown_connection(self):
-        try:
-            # explicit shutdown
-            self.conn.shutdown(socket.SHUT_WR)
-        except OSError:
-            pass
-        self.conn.close()
 
 class NonBlockingServer(BaseServer):
     def __init__(self):
@@ -540,68 +539,55 @@ class NonBlockingServer(BaseServer):
         self.outputs = []
 
         # Outgoing message queues (socket:Queue)
-        self.message_queues = {}
-
-    #def serve_single(self):
-    #    print("* Waiting for a single HTTP request at port {0}".format(self.PORT))
-    #    conn, addr = self.socket.accept()
-    #    rfile = conn.makefile("rb",-1)
-    #    messege = b""
-    #    while True:
-    #        data = rfile.readline(65537)
-    #        print(data)
-    #        messege += data
-    #        if data == b"\r\n": break
-    #    print(messege)
-    #    data = rfile.read(3)
-    #    print(data)
+        self.handlers = {}
 
     def serve_persistent(self):
-        while self.inputs:
-            readable, writable, exceptional = select.select(self.inputs, self.outputs, self.message_queues)
-            for s in readable:
-                if s is self.socket:
-                    # Server is ready to accept a connection
-                    conn, addr = self.socket.accept()
-                    conn.setblocking(0)
-                    self.inputs.append(conn)
+        try:
+            while self.inputs:
+                readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs)
+                for s in readable:
+                    if s is self.socket:
+                        # Server is ready to accept a connection
+                        conn, addr = self.socket.accept()
+                        conn.setblocking(0)
+                        self.inputs.append(conn)
 
-                    # Give the connection a queue for data we want to send
-                    self.message_queues[conn] = queue.Queue()
-                else:
-                    data = s.recv(1024)
-                    if data:
-                        self.message_queues[s].put("output")
-                        if s not in self.outputs:
-                            self.outputs.append(s)
+                        # Give the connection a queue for data we want to send
+                        self.handlers[conn] = queue.Queue()
                     else:
-                        # closing connection
-                        if s in self.outputs:
-                            self.outputs.remove(s)
-                        self.inputs.remove(s)
-                        s.close()
+                        handler = HttpHandler(s,self)
+                        if handler.parse_request():
+                            self.handlers[s].put(handler)
+                            if s not in self.outputs:
+                                self.outputs.append(s)
+                        else:
+                            self.clear(s)
+                for s in writable:
+                    try:
+                        next_handler = self.handlers[s].get_nowait()
+                    except queue.Empty:
+                        self.outputs.remove(s)
+                    else:
+                        next_handler.handle_one_request()
+                        if next_handler.close:
+                            self.clear(s)
+                for s in exceptional:
+                    self.clear(s)
+        except KeyboardInterrupt:
+            self.clear(self.socket)
 
-                        # remove message queue
-                        del self.message_queues[s]
-            for s in writable:
-                try:
-                    next_msg = self.message_queues[s].get_nowait()
-                except queue.Empty:
-                    self.outputs.remove(s)
-                else:
-                    s.send(next_msg)
-            for s in exceptional:
-                self.inputs.remove(s)
-                if s in self.outputs:
-                    self.outputs.removev(s)
-                s.close()
+    def clear(self,connection):
+        if connection in self.outputs:
+            self.outputs.remove(connection)
+        if connection in self.inputs:
+            self.inputs.remove(connection)
+        self.shutdown_connection(connection)
 
-                del self.message_queues[s]
-
+        del self.handlers[connection]
 
 if __name__ == "__main__":
-    #server = ForkingServer()
-    server = NonBlockingServer()
+    server = ForkingServer()
+    #server = NonBlockingServer()
     #server.serve_single()
     #server._serve_non_persistent()
     server.serve_persistent()
