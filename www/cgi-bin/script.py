@@ -10,8 +10,16 @@ for i in range(0,20):
 body += "</ul>\r\n"
 body += "<h3>Environmental variables:</h3><p>" + str(os.environ.copy()) + "</p>\r\n"
 
+params = os.environ["QUERY_STRING"].split("&")
+if len(params)>1:
+    body += "<h1>"
+    for each in params:
+        body += " "+each+" "
+    body +="</h1>"
+
 # Read and add request body to response body
-if os.environ["REQUEST_METHOD"]=="POST" and os.environ["CONTENT_LENGTH"]!="0" and os.environ["CONTENT_LENGTH"]!="" :body += "<h3>Request body:</h3><p>" + sys.stdin.read() + "</p>\r\n"
+if os.environ["REQUEST_METHOD"]=="POST" and os.environ["CONTENT_LENGTH"]!="0" and os.environ["CONTENT_LENGTH"]!="" :
+    body += "<h3>Request body:</h3><p>" + sys.stdin.read() + "</p>\r\n"
 
 # Calculate the size of the response
 size = len(body.encode('utf-8')) + 1 # +1, else chrome interrupts connection
