@@ -41,10 +41,11 @@ index_files = index.html index.htm
 
 ### To do
 
-* ~~Handle defunct child processes~~
+* ~~Handle zombie processes~~
 * ~~HTTP/1.1 and HTTP/0.9 support~~
-* ~~CGI-compatible~~
-* Non-blocking version (using select)
-* Async version (using gevent)
-* Advanced documentation
-* Automated tests
+* ~~Basic CGI handling~~
+* Non-blocking IO (select)
+* Async (gevent or else)
+* Caching
+* Documentation
+* Testing
