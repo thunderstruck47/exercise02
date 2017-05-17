@@ -1,7 +1,0 @@
-Concurrency,RPS(Persistent connections),RPS(Nonpersistent connections)
-1,23.11,301.01
-100,2277.30,1871.43
-200,4438.88,1915.00
-300,6319.20,1914.27
-400,8039.79,
-500,,

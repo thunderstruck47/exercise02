@@ -1,10 +1,16 @@
 *.un~
 *~
+*.swp
 www/cs.html
 www/sari.html
 www/upload.html
 www/uploads
 server_old.py
+s.py
+server_.py
+test.py
 tests/experimental
 tests/siege
 tests/a.sh
+tests/data/
+tests/plots/

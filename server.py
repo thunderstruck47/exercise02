@@ -1,4 +1,9 @@
 #!/usr/bin/env python
+"""\
+TODO: Add documentation
+"""
+
+__name__ = "bistro"
 __version__ = "0.0.2"
 
 # Standard modules
@@ -12,13 +17,10 @@ import mimetypes
 import datetime
 import time
 import shutil
-
 # Non-blocking IO
 import select
-
-# Multiprocessing
+# Multiprocessing (not used)
 import multiprocessing
-
 # Import correct config parser and queue
 if sys.version_info > (3, 0):
     import configparser
@@ -26,29 +28,71 @@ if sys.version_info > (3, 0):
 else:
     import ConfigParser
     import Queue as queue
-
 # Community modules (optional)
 try:
     import magic
 except ImportError:
     pass
+# TODO: Should use in future
+#try:
+#    from cStringIO import StringIO
+#except ImportError:
+#    from StringIO import StringIO
 
 class HttpHandler():
-
-    version = "HTTP/1.0" # HTTP version
-    supported_methods = ["GET", "HEAD", "POST"]
-    responses = {
-        200: "OK",
-        201: "Created",
-        400: "Bad Request",
-        403: "Forbidden",
-        404: "Not Found",
-        414: "Request URI Too Long",
-        500: "Internal Server Error",
-        501: "Not Implemented",
-        505: "HTTP Version Not Supported"
+    """ TODO """
+    
+    # NOTE: HttpHandler is implemented as a State Machine with six stages,
+    # three main stages and three sub-stages. The main stages (set below)
+    # define states where we should check the buffer for data. Their use
+    # is to answer the questions - Is status line recieved?, Are headers
+    # recieved?, Is the body recieved? - represented by the methods - 
+    # status_line_recieved(), headers_recieved(), body_recieved(). The
+    # minor stages are used to process the respective part of the request.
+    STAGE1 = -1
+    STAGE2 = 0
+    STAGE3 = 1
+   
+    # XXX: Using StringIO rather than lists of string objects returned by
+    # recv() minimizes memory usage and fragmentation that occurs when
+    # rbufsize is large compared to the typical return value of recv().
+    # SOURCE: https://svn.python.org/projects/python/trunk/Lib/socket.py
+    def reset_buffer(self):
+        """init and reset socket data buffer"""
+        self.__input_buffer = b''
+   
+   # Current request variables. When done, should be cleared with refresh()
+    def refresh(self):
+        """init and reset current request variables"""
+        self.__status_line = b''
+        self.__headers = []
+        self.__response = b''
+        self.__method = ''
+        self.__path = ''
+        self.__version = ''
+        self.__content_length = ''
+        self.__stage = self.STAGE1 # -1(rcvd_st),0(rcvd_hd),1(rcvd_bd)
+    
+    # The outgoing message queue
+    response_queue = queue.Queue()
+    # List of supported methods and a dictionarry of supported response codes
+    __supported_methods = ['GET', 'HEAD', 'POST']
+    __responses = {
+        200: 'OK',
+        201: 'Created',
+        400: 'Bad Request',
+        403: 'Forbidden',
+        404: 'Not Found',
+        414: 'Request URI Too Long',
+        500: 'Internal Server Error',
+        501: 'Not Implemented',
+        505: 'HTTP Version Not Supported'
     }
-     # Populate MIME types dictionary
+    
+    # CRLF
+    __lt = b'\r\n'
+    
+    # Populate MIME types dictionary
     if not mimetypes.inited: mimetypes.init() # try to read system mime.types
     extensions_map = mimetypes.types_map.copy()
     extensions_map.update({
@@ -58,22 +102,235 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self, conn, server):
+    def __init__(self,conn,server):
+        """conn stands for connection"""
         self.server = server
         self.conn = conn
         self.addr = conn.getpeername()
-        self.close = False
-        self.rfile = self.conn.makefile('rb', -1)
-        self.wfile = self.conn.makefile('wb', 0)
-        if self.server.HTTP_VERSION == 1.1:
-            self.version = "HTTP/1.1"
-        elif self.server.HTTP_VERSION == 1.0:
-            self.version = "HTTP/1.0"
-        # Go
-        #try:
-        #    self.handle_connection()
-        #finally:
-        #    self.finalize()
+        self.close = True
+        # Create current reques variables
+        self.refresh()
+        # Create input buffer
+        self.reset_buffer()
+        # XXX: validate?
+        if self.server.HTTP_VERSION == 1.1: self.version = 'HTTP/1.1'
+        elif self.server.HTTP_VERSION == 1.0: self.version = 'HTTP/1.0'
+
+    def handle(self):
+        """this class operates our state machine"""
+        # Recv data from socket
+        self.recv()
+        # Check stage
+        if self.__stage == self.STAGE1:
+            if self.status_line_recieved():
+                if self.status_line_parse():
+                    #if self.version = 'HTTP/0.9':
+                    #   do prepare response
+                    #   do queue response
+                    #   do refresh()
+                    #   do go_to_stage -1
+                    #else goto next stage
+                    self.__stage = self.STAGE2
+                # error was send
+        if self.__stage == self.STAGE2:
+            if self.headers_recieved():
+                if self.headers_parse():
+                    # if self.__content_length = '0' or self.__content_length = '':
+                    #   do prepare response
+                    #   do queue response
+                    #   do refresh()
+                    #   do go_to_stage -1
+                    #else goto next stage
+                    self.__stage = self.STAGE3
+                else:
+                    # error was send
+                    self.__stage = self.STAGE1
+        if self.__stage == self.STAGE3:
+            self.refresh()
+            pass
+
+    def recv(self):
+        """returns void"""
+        # Read until the socket blocks
+        while True:
+            try:
+                data = self.conn.recv(self.server.REQ_BUFFSIZE)
+                if data: self.__input_buffer += data
+                else:
+                # XXX:client closed connection, should do more
+                    self.server.shutdown_connection(self.conn)
+                    break
+                if len(data) < self.server.REQ_BUFFSIZE: break
+            # Break the loop if EWOULDBLOCK
+            except (socket.error, IOError) as e:
+                if e.errno == errno.EINTR: continue # retry recv call
+                elif e.errno != errno.EWOULDBLOCK: raise # should close connection
+                break #EWOULDBLOCK
+    
+    def send(self):
+        """returns void"""
+        pass
+
+    def status_line_recieved(self):
+        """returns True if status line was recieved"""
+        try:
+            self.__status_line, self.__input_buffer = self.__input_buffer.split(self.__lt,1)
+            return True
+        except ValueError:
+            # XXX: should be a different value i.e.: 
+            # MAXLENURL, LENURL, MAXURL, URILEN, MAXURILEN
+            if len(self.__input_buffer) > 2:#self.server.REQ_BUFFSIZE:
+                self.send_error(414)
+                self.refresh()
+                # NOTE: Reset input buffer
+                self.reset_buffer()
+            return False
+    
+    def status_line_parse(self):
+        """returns True if request is valid""" 
+        status_line = self.__status_line.decode()
+        status_line = status_line.split(' ')
+        print(status_line)
+        # HTTP/1.0 and HTTP/1.1
+        if len(status_line) == 3:
+            self.__method, self.__path, self.__version = status_line
+            if self.validate_version(self.__version) and self.validate_method(self.__method): return True
+        # HTTP/0.9
+        elif len(status_line) == 2:
+            self.__method, self.__path = status_line
+            if self.__method != 'GET': self.send_error(400)
+            else: return True
+        # Bad request
+        else: self.send_error(400)
+        # Request is invalid
+        return False
+
+    def validate_version(self,version):
+        # XXX: Do I really need all that fuss below? 
+        if version[:5] != "HTTP/":
+            self.send_error(400)
+            return False
+        try:
+            version_number = version.split("/",1)[1].split(".")
+            if len(version_number) != 2:
+                raise ValueError
+            version_number = int(version_number[0]), int(version_number[1])
+            if version_number[0] < 1 or version_number[1] < 0:
+                raise ValueError
+        except(ValueError, IndexError):
+            self.send_error(400)
+            return False
+        if version_number[0] > 1: # HTTP/2+
+            self.send_error(505) # Not supported
+            return False
+        if version != "HTTP/1.1" and version != "HTTP/1.0":
+            self.send_error(505) # Bad HTTP version
+            return False
+        if version == "HTTP/1.1": # Change default close
+            self.close = False
+        return True
+
+    def validate_method(self,method):
+        if method not in self.__supported_methods:
+            self.send_error(400)
+            return False
+        return True
+ 
+    def validate_path(self,method):
+        pass
+
+    def headers_recieved(self):
+        """returns True if headers were received"""
+        try:
+            while True:
+                header, self.__input_buffer = self.__input_buffer.split(self.__lt, 1)
+                if not header: break
+                self.__headers.append(header)
+            return True
+        except ValueError:
+            return False
+    
+    def headers_parse(self):
+        # XXX: Currently ignores badly formed request headers
+        for line in self.__headers:
+            print(line)
+            try:
+                f, v = [x.strip() for x in line.split(":",1)]
+                if f.lower() == "connection":
+                    if v.lower() == "close":
+                        self.close = True
+                        self.add_header("Connection","close")
+                    elif v.lower() == "keep-alive": 
+                        self.close = False
+                        self.add_header("Connection","close")
+                elif f.lower() == "content-length": self.__content_length = v
+                elif f.lower() == "content-type": self.__content_type = v
+            except:
+                # XXX: Should handle this
+                pass
+
+    def send_error(self,code):
+        """adds error to response queue"""
+        # TODO: Validate?
+        try:
+            message = self.__responses[code]
+        except KeyError:
+            message = '???'
+        self.add_response(code, message)
+        if self.close: self.add_header("Connection","close")
+        else: self.add_header("Connection","keep-alive")
+        self.add_header('Content-length','0')
+        self.add_end_header()
+        self.queue_response()
+        # TODO: Add message boyd
+    
+    def queue_response(self):
+        """adds current response to response queue"""
+        self.response_queue.put(self.__response)
+        self.refresh()
+
+    def add_response(self, code, message):
+        """writes response status code and default headers"""
+        if len(self.__response) != 0: self.refresh() # Possibly not needed
+        if self.version == 'HTTP/0.9':
+            self.__response += '{0} {1}\r\n'.format(code,message).encode()
+        else:
+            self.__response += '{0} {1} {2}\r\n'.format(self.version,code,message).encode()
+            self.add_header('Date', self.date_time_string())
+            self.add_header('Server', self.server_string())
+        # Should be done later:
+        #if self.close: self.add_header("Connection", "close")
+        #else: self.add_header("Connection", "keep-alive")
+
+    def add_header(self,name,value):
+        # XXX: Should validate
+        self.__response += '{0}:{1}'.format(name.strip(),value.strip()).encode()
+        self.add_end_header()
+    
+    def add_end_header(self):
+        self.__response += self.__lt
+
+    def server_string(self):
+        """returns server name and version"""
+        return __name__ + '/' + __version__
+    
+    def date_time_string(self):
+        """returns current date time"""
+        return self.httpdate(datetime.datetime.utcnow())
+
+    def httpdate(self, dt):
+        """Return a string representation of a date according to RFC 1123
+        (HTTP/1.1).
+
+        The supplied date must be in UTC.
+
+        """
+        weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
+        month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
+                 "Oct", "Nov", "Dec"][dt.month - 1]
+        return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
+            dt.year, dt.hour, dt.minute, dt.second)
+
 
     def finalize(self):
         if not self.wfile.closed:
@@ -135,10 +392,12 @@ class HttpHandler():
         # Preparing message headers
         self.m_head = []
         while True:
+            select.select([self.conn], [], [])
             line = self.rfile.readline(self.server.REQ_BUFFSIZE) # Too long?
             self.m_head.append(line.rstrip(b"\r\n").decode())
+            print(line)
             if line == b"\r\n": break
-
+        print(len(self.m_head))
         # Processing
         self.status_line =  self.status_line_string.split()
 
@@ -281,15 +540,6 @@ class HttpHandler():
         shutil.copyfileobj(f,self.wfile)
         f.close()
 
-    def write_code(self, code):
-        if self.version != "HTTP/0.9": self.wfile.write("{0} {1} {2}\r\n".format(self.version, code, self.responses[code]).encode())
-        else: self.wfile.write("{0} {1}\r\n".format(code, self.responses[code]).encode())
-        #self.code = code
-        if self.version != "HTTP/0.9":
-            if self.close: self.wfile.write("Connection: close\r\n".encode())
-            else: self.wfile.write("Connection: keep-alive\r\n".encode()) # HTTP 1.0
-
-
     def handle_path(self, path):
         self.query_string = ""
         # Lose parameters
@@ -358,22 +608,9 @@ class HttpHandler():
                 return key
         return ""
 
-    def httpdate(self, dt):
-        """Return a string representation of a date according to RFC 1123
-        (HTTP/1.1).
-
-        The supplied date must be in UTC.
-
-        """
-        weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
-        month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
-                 "Oct", "Nov", "Dec"][dt.month - 1]
-        return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
-            dt.year, dt.hour, dt.minute, dt.second)
-
 class BaseServer(object):
     version_string = __version__
-    name = "Bistro"
+    name = __name__
 
     def __init__(self, config_filename = "server.conf"):
 
@@ -386,7 +623,7 @@ class BaseServer(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.HOST, self.PORT))
-        self.socket.listen(2048) # Should be set in confing / Test it
+        self.socket.listen(5) # Should be set in confing / Test it
 
     def configure(self, filepath):
         # Defaults:
@@ -530,18 +767,6 @@ class ForkingServer(BaseServer):
             if pid == 0:
                 return
 
-class MultiprocessingServer(BaseServer):
-    def serve_persistent(self):
-        try:
-            while True:
-                conn, addr = self.socket.accept()
-                process = multiprocessing.Process(target = HttpHandler(conn,self).handle_connection)
-                process.daemon = True
-                process.start()
-                conn.close()
-        except KeyboardInterrupt:
-            self.shutdown_connection(self.socket)
-
 class NonBlockingServer(BaseServer):
     def __init__(self, config = "server.conf"):
         # Initializing base server config
@@ -565,7 +790,7 @@ class NonBlockingServer(BaseServer):
             while self.inputs:
                 # Wait for at least one socket to be ready for processing
                 # Needs error handling (Keyboard Interrupt)
-                readable, writable, exceptional = select.select(self.inputs, [],[])   
+                readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs)   
 
                 # Handle inputs
                 for s in readable:
@@ -577,24 +802,42 @@ class NonBlockingServer(BaseServer):
                         self.inputs.append(conn)
 
                         # Give the connection a queue for the handlers
-                        self.handlers[conn] = HttpHandler(conn, self)
+                        self.handlers[conn] = queue.Queue()
                     else: # Read from connection
                         # Creates a new HttpHandler object.
                         # WARNING: Slows down persistent connections.
                         # Needs to be managed differently.
-                        # Check if request was parsed successfuly
-                        if s in self.handlers:
-                            try:
-                                if self.handlers[s].parse_request():
-                                    # Add handler to queue
-                                    self.handlers[s].handle_one_request()
-                                    if self.handlers[s].close:
-                                        self.handlers[s].finalize()
-                                        self.clear(s)
-                                else:
-                                    self.clear(s)  
-                            except socket.error:
-                                if s in self.handlers: del self.handlers[s]
+                        try:
+                            handler = HttpHandler(s,self)
+                            # Check if request was parsed successfuly
+                            if handler.parse_request():
+                                # Add handler to queue
+                                self.handlers[s].put(handler)
+                                if s not in self.outputs:
+                                    self.outputs.append(s)
+                            else:
+                                self.clear(s)
+                                if s in writable:
+                                    writable.remove(s)
+                        except:
+                            self.clear(s)
+                
+                # Handle outputs
+                for s in writable:
+                    print (self.handlers[s].qsize())
+                    try:
+                        next_handler = self.handlers[s].get_nowait()
+                    except (queue.Empty):
+                        self.outputs.remove(s)
+                    except (KeyError):
+                        pass
+                    else:
+                        next_handler.handle_one_request()
+                        if next_handler.close:
+                            self.clear(s)
+                            if s in self.inputs:
+                                self.inputs.remove(s)
+                # Handle "exceptional conditions"
                 for s in exceptional:
                     self.clear(s)
 
@@ -606,14 +849,31 @@ class NonBlockingServer(BaseServer):
             self.outputs.remove(connection)
         if connection in self.inputs:
             self.inputs.remove(connection)
-        self.shutdown_connection(connection)
+        #self.shutdown_connection(connection)
 
         if connection in self.handlers:
             del self.handlers[connection]
 
-if __name__ == "__main__":
-    #server = ForkingServer()
+if __name__ == "bistro":
+    server = ForkingServer()
+    conn, _ = server.socket.accept()
+    conn.setblocking(False)
+    handler = HttpHandler(conn,server)
+    while True:
+        r,w,e = select.select([conn],[],[])
+        handler.handle()
+        print (handler.response_queue.qsize())
+        try:
+            r = handler.response_queue.get_nowait()
+        except (queue.Empty):
+            pass
+        except (KeyError):
+            pass
+        else:
+            print(r)
+
     #server = MultiprocessingServer()
-    server = NonBlockingServer()
-    server.serve_persistent()
+    #server = MPNblockServer()
+    #server = NonBlockingServer()
+    #server.serve_persistent()
     print("Bye")
