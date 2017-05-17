@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 """\
-TODO: Add documentation
+TODO: About
 """
 
 __name__ = "bistro"
@@ -38,6 +38,7 @@ except ImportError:
 #    from cStringIO import StringIO
 #except ImportError:
 #    from StringIO import StringIO
+from io import BytesIO
 
 class HttpHandler():
     """ TODO """
@@ -71,7 +72,8 @@ class HttpHandler():
         self.__path = ''
         self.__version = ''
         self.__content_length = ''
-        self.__stage = self.STAGE1 # -1(rcvd_st),0(rcvd_hd),1(rcvd_bd)
+        self.__cgi = False
+        self.__stage = self.STAGE1
     
     # The outgoing message queue
     response_queue = queue.Queue()
@@ -88,10 +90,10 @@ class HttpHandler():
         501: 'Not Implemented',
         505: 'HTTP Version Not Supported'
     }
-    
+
     # CRLF
     __lt = b'\r\n'
-    
+
     # Populate MIME types dictionary
     if not mimetypes.inited: mimetypes.init() # try to read system mime.types
     extensions_map = mimetypes.types_map.copy()
@@ -124,24 +126,26 @@ class HttpHandler():
         if self.__stage == self.STAGE1:
             if self.status_line_recieved():
                 if self.status_line_parse():
-                    #if self.version = 'HTTP/0.9':
-                    #   do prepare response
-                    #   do queue response
-                    #   do refresh()
-                    #   do go_to_stage -1
-                    #else goto next stage
-                    self.__stage = self.STAGE2
-                # error was send
+                    if self.__version == 'HTTP/0.9':
+                        self.queue_file()
+                        self.__stage = self.STAGE1
+                    else:
+                        self.__stage = self.STAGE2
+                #ekse error was sent
         if self.__stage == self.STAGE2:
             if self.headers_recieved():
+                print(self.headers_parse)
                 if self.headers_parse():
-                    # if self.__content_length = '0' or self.__content_length = '':
+                    self.queue_file()
+                    
+                    # if self.__content_length = '0' or \
+                    #        self.__content_length = '':
                     #   do prepare response
                     #   do queue response
                     #   do refresh()
                     #   do go_to_stage -1
                     #else goto next stage
-                    self.__stage = self.STAGE3
+                    self.__stage = self.STAGE1 #3
                 else:
                     # error was send
                     self.__stage = self.STAGE1
@@ -174,12 +178,13 @@ class HttpHandler():
     def status_line_recieved(self):
         """returns True if status line was recieved"""
         try:
-            self.__status_line, self.__input_buffer = self.__input_buffer.split(self.__lt,1)
+            self.__status_line, self.__input_buffer = \
+                    self.__input_buffer.split(self.__lt,1)
             return True
         except ValueError:
             # XXX: should be a different value i.e.: 
             # MAXLENURL, LENURL, MAXURL, URILEN, MAXURILEN
-            if len(self.__input_buffer) > 2:#self.server.REQ_BUFFSIZE:
+            if len(self.__input_buffer) > self.server.REQ_BUFFSIZE:
                 self.send_error(414)
                 self.refresh()
                 # NOTE: Reset input buffer
@@ -194,18 +199,25 @@ class HttpHandler():
         # HTTP/1.0 and HTTP/1.1
         if len(status_line) == 3:
             self.__method, self.__path, self.__version = status_line
-            if self.validate_version(self.__version) and self.validate_method(self.__method): return True
+            if self.validate_version() and self.validate_method() \
+                    and self.validate_path(): return True
         # HTTP/0.9
         elif len(status_line) == 2:
+            print("TUK")
+            self.__version = 'HTTP/0.9'
             self.__method, self.__path = status_line
-            if self.__method != 'GET': self.send_error(400)
-            else: return True
+            if self.__method == 'GET' and self.validate_path(): \
+                    return True
+            self.send_error(400)
         # Bad request
         else: self.send_error(400)
         # Request is invalid
+        self.__version = self.version
         return False
 
-    def validate_version(self,version):
+    def validate_version(self,version = None):
+        # NOTE: Useful for unit testing later on
+        if not version: version = self.__version
         # XXX: Do I really need all that fuss below? 
         if version[:5] != "HTTP/":
             self.send_error(400)
@@ -230,20 +242,76 @@ class HttpHandler():
             self.close = False
         return True
 
-    def validate_method(self,method):
+    def validate_method(self,method = None):
+        if not method: method = self.__method
         if method not in self.__supported_methods:
             self.send_error(400)
             return False
         return True
  
-    def validate_path(self,method):
-        pass
+    def validate_path(self,path = None):
+        if not path: path = self.__path
+        # FIXME: Losely based on previous version - needs error handling!
+        # FIXME: status_line = ['GET', ''] ?
+        if path == '' or path == ' ': return False
+        # XXX: Check path input /cgi-bin/script.py\/
+        # XXX: Is injection possible?
+        # TODO: Unit tests on all methods
+        # Lose parameters:
+        path = path.split("#",1)[0]
+        path = path.split("?",1)
+        try:
+            self.__query_string = path[1]
+        except:
+            self.__query_string = ''
+        print(self.__query_string)
+        path = path[0]
+        path = os.path.abspath(path)
+        path = self.server.PUBLIC_DIR + path
+        print(path)
+        # CGI?
+        # FIXME: Replace input with configurable i.e. CGIDIR, DIRCGI, CGIPATH
+        if path.startswith(self.server.PUBLIC_DIR + "/cgi-bin/"):
+            if os.path.isfile(path):
+                self.__filename = os.path.basename(path)
+                self.__cgi = True
+                self.__path = path
+                return True
+        # Directory?
+        if os.path.isdir(path):
+            for index in self.server.INDEX_FILES:
+                index = os.path.join(path, index)
+                if os.path.isfile(index):
+                    path = index
+                    break
+            else:
+                self.send_error(403)
+                return False
+        # File?
+        if os.path.isfile(path):
+            self.__path = path
+            return True
+        # Strip /; check again
+        path = path.rstrip("/")
+        if os.path.isfile(path):
+            self.__path = path
+            return True
+        # Not found
+        self.send_error(404)
+        return False
+ 
 
     def headers_recieved(self):
         """returns True if headers were received"""
+        # FIXME: Should validate headers, ignore bad headers, or send 400
         try:
+            #if self.__input_buffer.startswith(b'\r\n'):
+            #    #self.__input_buffer.lstrip(b'\r\n')
+            #    print("asd")
+            #    return True
             while True:
-                header, self.__input_buffer = self.__input_buffer.split(self.__lt, 1)
+                header, self.__input_buffer = \
+                        self.__input_buffer.split(self.__lt, 1)
                 if not header: break
                 self.__headers.append(header)
             return True
@@ -252,22 +320,25 @@ class HttpHandler():
     
     def headers_parse(self):
         # XXX: Currently ignores badly formed request headers
+        # FIXME: Should close connection in HTTP/1.0 unless keep-alive was
+        # specified.
         for line in self.__headers:
             print(line)
             try:
-                f, v = [x.strip() for x in line.split(":",1)]
+                f, v = [x.strip() for x in line.decode().split(":",1)]
                 if f.lower() == "connection":
                     if v.lower() == "close":
                         self.close = True
-                        self.add_header("Connection","close")
+                        #self.add_header("Connection","close")
                     elif v.lower() == "keep-alive": 
                         self.close = False
-                        self.add_header("Connection","close")
+                        #self.add_header("Connection","close")
                 elif f.lower() == "content-length": self.__content_length = v
                 elif f.lower() == "content-type": self.__content_type = v
             except:
                 # XXX: Should handle this
                 pass
+        return True
 
     def send_error(self,code):
         """adds error to response queue"""
@@ -277,9 +348,10 @@ class HttpHandler():
         except KeyError:
             message = '???'
         self.add_response(code, message)
-        if self.close: self.add_header("Connection","close")
-        else: self.add_header("Connection","keep-alive")
-        self.add_header('Content-length','0')
+        if self.__version != 'HTTP/0.9':
+            if self.close: self.add_header('Connection','close')
+            else: self.add_header('Connection','keep-alive')
+            self.add_header('Content-length','0')
         self.add_end_header()
         self.queue_response()
         # TODO: Add message boyd
@@ -288,23 +360,41 @@ class HttpHandler():
         """adds current response to response queue"""
         self.response_queue.put(self.__response)
         self.refresh()
+    
+    def queue_file(self):
+        """adds a file to response queue"""
+        try:
+            with open(self.__path,'rb') as f:
+                f = f.read()
+                f = bytes(f)
+                self.add_response(200,'OK')
+                if self.close: self.add_header('Connection','close')
+                else: self.add_header('Connection','keep-alive')
+                self.__response += f
+                self.queue_response()
+        except IOError as e:
+            self.send_error(500)
 
     def add_response(self, code, message):
         """writes response status code and default headers"""
         if len(self.__response) != 0: self.refresh() # Possibly not needed
-        if self.version == 'HTTP/0.9':
+        if self.__version == 'HTTP/0.9':
             self.__response += '{0} {1}\r\n'.format(code,message).encode()
         else:
-            self.__response += '{0} {1} {2}\r\n'.format(self.version,code,message).encode()
+            # XXX: Should we switch versions?
+            self.__response += '{0} {1} {2}\r\n'.format(
+                    self.__version,code,message).encode()
             self.add_header('Date', self.date_time_string())
             self.add_header('Server', self.server_string())
+            
         # Should be done later:
         #if self.close: self.add_header("Connection", "close")
         #else: self.add_header("Connection", "keep-alive")
 
     def add_header(self,name,value):
         # XXX: Should validate
-        self.__response += '{0}:{1}'.format(name.strip(),value.strip()).encode()
+        self.__response += '{0}:{1}'.format(
+                name.strip(),value.strip()).encode()
         self.add_end_header()
     
     def add_end_header(self):
@@ -325,7 +415,8 @@ class HttpHandler():
         The supplied date must be in UTC.
 
         """
-        weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][dt.weekday()]
+        weekday = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"] \
+                [dt.weekday()]
         month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep",
                  "Oct", "Nov", "Dec"][dt.month - 1]
         return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
@@ -870,7 +961,8 @@ if __name__ == "bistro":
         except (KeyError):
             pass
         else:
-            print(r)
+            conn.send(r)
+            #conn.send(r)
 
     #server = MultiprocessingServer()
     #server = MPNblockServer()
