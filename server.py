@@ -110,6 +110,7 @@ class HttpHandler():
         self.conn = conn
         self.addr = conn.getpeername()
         self.close = True
+        self.finished = False
         # Create current reques variables
         self.refresh()
         # Create input buffer
@@ -117,6 +118,9 @@ class HttpHandler():
         # XXX: validate?
         if self.server.HTTP_VERSION == 1.1: self.version = 'HTTP/1.1'
         elif self.server.HTTP_VERSION == 1.0: self.version = 'HTTP/1.0'
+
+    def handle_connection(self):
+        if self.close: self.finished = True
 
     def handle(self):
         """this class operates our state machine"""
@@ -128,16 +132,16 @@ class HttpHandler():
                 if self.status_line_parse():
                     if self.__version == 'HTTP/0.9':
                         self.queue_file()
+                        self.handle_connection()
                         self.__stage = self.STAGE1
                     else:
                         self.__stage = self.STAGE2
                 #ekse error was sent
         if self.__stage == self.STAGE2:
             if self.headers_recieved():
-                print(self.headers_parse)
                 if self.headers_parse():
                     self.queue_file()
-                    
+                    self.handle_connection()
                     # if self.__content_length = '0' or \
                     #        self.__content_length = '':
                     #   do prepare response
@@ -173,7 +177,19 @@ class HttpHandler():
     
     def send(self):
         """returns void"""
-        pass
+        try:
+            next_response = self.response_queue.get_nowait()
+        except (queue.Empty):
+            pass
+            self.server.outputs.remove(self.conn)
+        except (KeyError):
+            pass
+        else:
+            # XXX: Needs error handling
+            self.conn.send(next_response)
+            #print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), next_response.split('\r\n',1)[0], self.code))
+
+
 
     def status_line_recieved(self):
         """returns True if status line was recieved"""
@@ -192,10 +208,14 @@ class HttpHandler():
             return False
     
     def status_line_parse(self):
-        """returns True if request is valid""" 
-        status_line = self.__status_line.decode()
+        """returns True if request is valid"""
+        try:
+            status_line = self.__status_line.decode()
+        except UnicodeDecodeError:
+            self.close = True
+            return False
         status_line = status_line.split(' ')
-        print(status_line)
+        #print(status_line)
         # HTTP/1.0 and HTTP/1.1
         if len(status_line) == 3:
             self.__method, self.__path, self.__version = status_line
@@ -203,14 +223,17 @@ class HttpHandler():
                     and self.validate_path(): return True
         # HTTP/0.9
         elif len(status_line) == 2:
-            print("TUK")
             self.__version = 'HTTP/0.9'
             self.__method, self.__path = status_line
             if self.__method == 'GET' and self.validate_path(): \
                     return True
+            self.__version = self.version
             self.send_error(400)
         # Bad request
-        else: self.send_error(400)
+        else:
+            # Reset protocol version
+            self.__version = self.version
+            self.send_error(400)
         # Request is invalid
         self.__version = self.version
         return False
@@ -253,7 +276,7 @@ class HttpHandler():
         if not path: path = self.__path
         # FIXME: Losely based on previous version - needs error handling!
         # FIXME: status_line = ['GET', ''] ?
-        if path == '' or path == ' ': return False
+        if path == '' or path == ' ' or not path.startswith("/"): return False
         # XXX: Check path input /cgi-bin/script.py\/
         # XXX: Is injection possible?
         # TODO: Unit tests on all methods
@@ -264,11 +287,11 @@ class HttpHandler():
             self.__query_string = path[1]
         except:
             self.__query_string = ''
-        print(self.__query_string)
+        #print(self.__query_string)
         path = path[0]
         path = os.path.abspath(path)
         path = self.server.PUBLIC_DIR + path
-        print(path)
+        #print(path)
         # CGI?
         # FIXME: Replace input with configurable i.e. CGIDIR, DIRCGI, CGIPATH
         if path.startswith(self.server.PUBLIC_DIR + "/cgi-bin/"):
@@ -322,22 +345,31 @@ class HttpHandler():
         # XXX: Currently ignores badly formed request headers
         # FIXME: Should close connection in HTTP/1.0 unless keep-alive was
         # specified.
+        connection = ''
         for line in self.__headers:
-            print(line)
+            #print(line)
             try:
-                f, v = [x.strip() for x in line.decode().split(":",1)]
-                if f.lower() == "connection":
-                    if v.lower() == "close":
-                        self.close = True
+                f, v = [x.strip() for x in line.decode().split(':',1)]
+                if f.lower() == 'connection':
+                    if v.lower() == 'close':
+                        connection = v.lower()
+                    elif v.lower() == 'keep-alive': 
+                        connection = v.lower()
                         #self.add_header("Connection","close")
-                    elif v.lower() == "keep-alive": 
-                        self.close = False
-                        #self.add_header("Connection","close")
-                elif f.lower() == "content-length": self.__content_length = v
-                elif f.lower() == "content-type": self.__content_type = v
+                elif f.lower() == 'content-length': self.__content_length = v
+                elif f.lower() == 'content-type': self.__content_type = v
             except:
                 # XXX: Should handle this
                 pass
+        # Check if connection header was set
+        #print(connection)
+        if len(connection) > 0:
+            if connection == 'close': self.close = True
+            else: self.close = False
+        else:
+            if self.__version == 'HTTP/0.9' or self.__version == 'HTTP/1.0':
+                self.close = True
+            else: self.close = False # HTTP/1.1
         return True
 
     def send_error(self,code):
@@ -368,8 +400,9 @@ class HttpHandler():
                 f = f.read()
                 f = bytes(f)
                 self.add_response(200,'OK')
-                if self.close: self.add_header('Connection','close')
-                else: self.add_header('Connection','keep-alive')
+                if self.__version != 'HTTP/0.9':
+                    if self.close: self.add_header('Connection','close')
+                    else: self.add_header('Connection','keep-alive')
                 self.__response += f
                 self.queue_response()
         except IOError as e:
@@ -377,6 +410,7 @@ class HttpHandler():
 
     def add_response(self, code, message):
         """writes response status code and default headers"""
+        self.code = code
         if len(self.__response) != 0: self.refresh() # Possibly not needed
         if self.__version == 'HTTP/0.9':
             self.__response += '{0} {1}\r\n'.format(code,message).encode()
@@ -422,156 +456,12 @@ class HttpHandler():
         return "%s, %02d %s %04d %02d:%02d:%02d GMT" % (weekday, dt.day, month,
             dt.year, dt.hour, dt.minute, dt.second)
 
-
-    def finalize(self):
-        if not self.wfile.closed:
-            try:
-                self.wfile.flush()
-            except:
-                pass
-            self.wfile.close()
-        self.rfile.close()
-        self.server.shutdown_connection(self.conn)
-
-    def handle_connection(self):
-        try:
-            while not self.close:
-                    self.parse_request()
-                    self.handle_one_request()
-            self.finalize()
-        except socket.error as e:
-            self.close = True
-            if e.errno == errno.EPIPE:
-                print("{0}:{1} - - [{2}] Connection interrupted (Broken pipe) -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-            
-
-    # Handles current connection
-    def handle_one_request(self):
-        #self.cgi = None
-        #self.parse_request()
-        # If an empty byte was sent: close the connection
-        if not self.code:
-            self.close = True
-            print("{0}:{1} - - [{2}] Client disconnected -".format(self.addr[0], self.addr[1],  time.strftime("%d/%m/%Y %H:%M:%S", time.localtime())))
-            return
-        if self.code == 200:
-            if not self.cgi: self.handle_request(self.method,self.path,self.version)
-            else: self.handle_cgi(self.path)
-        else:
-            self.write_code(self.code)
-            self.wfile.write(b"Content-Length: 0\r\n\r\n")
-        # Logging
-        if self.server.LOGGING: print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), self.status_line_string, self.code))
-
-    def parse_request(self):
-        self.content_length = 0
-        self.content_type = ""
-        self.method = ""
-        self.path = ""
-        self.m_body = None
-        self.code = None
-        self.cgi = None
-        # Preparing message status line
-        self.status_line_string = self.rfile.readline(self.server.REQ_BUFFSIZE + 1).decode()
-        self.status_line_string = self.status_line_string.rstrip("\r\n")
-        if len(self.status_line_string) > self.server.REQ_BUFFSIZE: # Rquest URI too long
-            self.code = 414
-            return True
-        elif self.status_line_string == "": # Client sent empty request: terminate connection
-            return False
-        #print(self.status_line_string)
-        # Preparing message headers
-        self.m_head = []
-        while True:
-            select.select([self.conn], [], [])
-            line = self.rfile.readline(self.server.REQ_BUFFSIZE) # Too long?
-            self.m_head.append(line.rstrip(b"\r\n").decode())
-            print(line)
-            if line == b"\r\n": break
-        print(len(self.m_head))
-        # Processing
-        self.status_line =  self.status_line_string.split()
-
-        # HTTP/1.0 and HTTP/1.1
-        if len(self.status_line) == 3:
-            method, path, version = self.status_line
-            if self.valid_http_method(method) and self.valid_http_version(version):
-                if version == "HTTP/1.1" : self.close = False
-                if version == "HTTP/1.0" : self.close = True
-                for line in self.m_head:
-                    self.parse_header(line)
-                self.method = method
-                self.version = version
-                self.path = self.handle_path(path)
-
-        # HTTP/0.9
-        elif len(self.status_line) == 2:
-            method, path = self.status_line
-            self.version = "HTTP/0.9"
-            self.close = True
-            if method == "GET":
-                self.method = method
-                self.path = self.handle_path(path)
-            else:
-                self.code = 400
-
-        # Invalid request
-        else:
-            self.close = True
-            self.code = 400
-
-        # If POST and message body
-        if self.method == "POST" and self.content_length > 0: #Prepare body
-            self.m_body = self.rfile.read(self.content_length)
-        return True
-
-    def parse_header(self, line):
-        try:
-            field, value = [x.strip() for x in line.split(":",1)]
-            if field.lower() == "connection":
-                if value.lower() == "close":
-                    self.close = True
-                elif value.lower() == "keep-alive":
-                    self.close = False
-            elif field.lower() == "content-length":
-                self.content_length = int(value)
-            elif field.lower() == "content-type":
-                self.content_type = str(value)
-        except:
-            pass
-            # Should be able to handle invalid headers
-
-    def valid_http_version(self,version):
-        if version[:5] != "HTTP/":
-            self.code = 400
-            return False
-        try:
-            version_number = version.split("/",1)[1].split(".")
-            if len(version_number) != 2:
-                raise ValueError
-            version_number = int(version_number[0]), int(version_number[1])
-            if version_number[0] < 1 or version_number[1] < 0:
-                raise ValueError
-
-        except(ValueError, IndexError):
-            self.close = True
-            self.code = 400
-            return False
-        if version_number[0] > 1: # HTTP/2+
-            self.code = 505
-            return False
-        if version != "HTTP/1.1" and version != "HTTP/1.0":
-            self.code = 505
-            self.close = True
-            return False
-        return True
-
-    def valid_http_method(self,method):
-        if method not in self.supported_methods:
-            self.code = 400
-            return False
-        return True
-
+    
+    # TODO: ------------------ NEEDS WORK BElOW -------------------------------
+    # _________________________________________________________________________
+    # _________________________________________________________________________
+    # _________________________________________________________________________
+    # _________________________________________________________________________
     def handle_cgi(self, path):
         env = {}
         env["SERVER_NAME"] = self.server.name
@@ -605,70 +495,7 @@ class HttpHandler():
             self.code = 500
             self.write_code(self.code)
             self.wfile.write(b"Content-Length: 0\r\n\r\n")
-
-    def handle_request(self, method, path, version):
-        self.write_code(self.code)
-        if method == "GET":
-            if version != "HTTP/0.9": self.write_head(path)
-            self.write_body(path)
-        elif method =="HEAD":
-            self.write_head(path)
-        elif method == "POST":
-            self.handle_request("GET", path,version)
-
-
-    def write_head(self, path):
-        size, mtime = self.get_file_info(path)
-        self.wfile.write("Content-Length: {0}\r\n".format(size).encode())
-        # if caching:
-        #self.wfile.write("Last-Modified: {0}\r\n".format(self.httpdate(datetime.datetime.fromtimestamp(mtime))))
-        self.wfile.write("Content-Type: {0}\r\n".format(self.get_file_type(path)).encode())
-        self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())).encode())
-        self.wfile.write("Server: {0}\r\n\r\n".format("Bistro/" + __version__).encode())
-
-    def write_body(self, path):
-        f = open(path, "rb")
-        shutil.copyfileobj(f,self.wfile)
-        f.close()
-
-    def handle_path(self, path):
-        self.query_string = ""
-        # Lose parameters
-        path = path.split("#",1)[0]
-        path = path.split("?",1)
-        try:
-            self.query_string = path[1]
-        except:
-            pass
-        path = path[0]
-        path = os.path.abspath(path)
-        # CGI?
-        if path.startswith("/cgi-bin/"):
-            if os.path.isfile(self.server.PUBLIC_DIR + path):
-                self.filename = os.path.basename(self.server.PUBLIC_DIR + path)
-                self.code = 200
-                self.cgi = True
-                return self.server.PUBLIC_DIR + path
-        path = self.server.PUBLIC_DIR + path
-        if os.path.isdir(path):
-            for index in self.server.INDEX_FILES:
-                index = os.path.join(path, index)
-                if os.path.isfile(index):
-                    path = index
-                    break
-            else:
-                self.code = 403
-                return
-        if os.path.isfile(path):
-            self.code = 200
-            return path
-        path = path.rstrip("/")
-        if os.path.isfile(path):
-            self.code = 200
-            return path
-        # Not found
-        self.code = 404
-
+    
     def get_file_info(self, filepath):
         f = open(filepath,'rb')
         fs = os.fstat(f.fileno())
@@ -797,67 +624,6 @@ class BaseServer(object):
         conn.close()
 
 
-class ForkingServer(BaseServer):
-    # Needs fixing
-    def _serve_non_persistent(self):
-        print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
-        try:
-            while True:
-                conn, addr = self.socket.accept()
-                if conn: # Not None
-                    pid = os.fork()
-                    if pid: # Parent
-                        conn.close()
-                    else: # Child
-                        self.socket.close()
-                        self.handler = HttpHandler(conn, addr, self)
-                        conn.close()
-                        os._exit(0)
-        except KeyboardInterrupt:
-            self.socket.close()
-            sys.exit(0)
-
-    def serve_persistent(self):
-        self.conn = None
-        #self.connected = False
-        #self.close_connection = False
-        print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
-        signal.signal(signal.SIGCHLD, self.signal_handler)
-        try:
-            while True:
-                try:
-                    pair = self.socket.accept()
-                except IOError as e:
-                    code, msg = e.args
-                    if code == errno.EINTR:
-                        continue
-                    else:
-                        raise
-                if pair:
-                    self.conn, self.addr = pair
-                    pid = os.fork() # Needs error handling
-                    if pid != 0: # Parent
-                        # close the file descriptor
-                        self.conn.close()
-                    else:
-                        self.socket.close()
-                        self.handler = HttpHandler(self.conn,self)
-                        self.handler.handle_connection()
-                        del self.handler
-                        os._exit(0)
-        except KeyboardInterrupt:
-            if self.conn: self.conn.close()
-            self.socket.close()
-
-    def signal_handler(self, signum, frame):
-        while True:
-            try:
-                pid, status = os.waitpid(-1, os.WNOHANG)
-            except OSError:
-                return
-            if pid == 0:
-                return
-
 class NonBlockingServer(BaseServer):
     def __init__(self, config = "server.conf"):
         # Initializing base server config
@@ -893,41 +659,21 @@ class NonBlockingServer(BaseServer):
                         self.inputs.append(conn)
 
                         # Give the connection a queue for the handlers
-                        self.handlers[conn] = queue.Queue()
+                        self.handlers[conn] = HttpHandler(conn,self)
                     else: # Read from connection
                         # Creates a new HttpHandler object.
                         # WARNING: Slows down persistent connections.
                         # Needs to be managed differently.
-                        try:
-                            handler = HttpHandler(s,self)
-                            # Check if request was parsed successfuly
-                            if handler.parse_request():
-                                # Add handler to queue
-                                self.handlers[s].put(handler)
-                                if s not in self.outputs:
-                                    self.outputs.append(s)
-                            else:
-                                self.clear(s)
-                                if s in writable:
-                                    writable.remove(s)
-                        except:
-                            self.clear(s)
-                
+                        handler = self.handlers[s]
+                        # Check if request was parsed successfuly
+                        handler.handle()
+                        self.outputs.append(s)
                 # Handle outputs
                 for s in writable:
-                    print (self.handlers[s].qsize())
-                    try:
-                        next_handler = self.handlers[s].get_nowait()
-                    except (queue.Empty):
-                        self.outputs.remove(s)
-                    except (KeyError):
-                        pass
-                    else:
-                        next_handler.handle_one_request()
-                        if next_handler.close:
-                            self.clear(s)
-                            if s in self.inputs:
-                                self.inputs.remove(s)
+                    handler = self.handlers[s]
+                    handler.send()
+                    if handler.finished:
+                        self.clear(s)
                 # Handle "exceptional conditions"
                 for s in exceptional:
                     self.clear(s)
@@ -940,12 +686,12 @@ class NonBlockingServer(BaseServer):
             self.outputs.remove(connection)
         if connection in self.inputs:
             self.inputs.remove(connection)
-        #self.shutdown_connection(connection)
+        self.shutdown_connection(connection)
 
         if connection in self.handlers:
             del self.handlers[connection]
 
-if __name__ == "bistro":
+def test():
     server = ForkingServer()
     conn, _ = server.socket.accept()
     conn.setblocking(False)
@@ -953,7 +699,7 @@ if __name__ == "bistro":
     while True:
         r,w,e = select.select([conn],[],[])
         handler.handle()
-        print (handler.response_queue.qsize())
+        #print (handler.response_queue.qsize())
         try:
             r = handler.response_queue.get_nowait()
         except (queue.Empty):
@@ -963,9 +709,10 @@ if __name__ == "bistro":
         else:
             conn.send(r)
             #conn.send(r)
+        if handler.close: break
 
-    #server = MultiprocessingServer()
-    #server = MPNblockServer()
-    #server = NonBlockingServer()
-    #server.serve_persistent()
+
+if __name__ == "bistro":
+    server = NonBlockingServer()
+    server.serve_persistent()
     print("Bye")
