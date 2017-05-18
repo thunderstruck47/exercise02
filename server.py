@@ -725,10 +725,10 @@ class NonBlockingServer(BaseServer):
                         # Set to non-blocking
                         conn.setblocking(False)
                         self.inputs.append(conn)
-                        #self.handlers[conn] = HttpHandler(conn,self)
+                        self.handlers[conn] = HttpHandler(conn,self)
                     else:
-                        if s not in self.handlers:
-                            self.handlers[s] = HttpHandler(s,self)
+                        #if s not in self.handlers:
+                        #    self.handlers[s] = HttpHandler(s,self)
                         handler = self.handlers[s]
                         if handler.handle():
                             if s not in self.outputs:
@@ -759,7 +759,10 @@ class NonBlockingServer(BaseServer):
             self.outputs.remove(connection)
         if connection in self.inputs:
             self.inputs.remove(connection)
-        self.shutdown_connection(connection)
+        try:
+            self.shutdown_connection(connection)
+        except socket.error as e:
+            pass
         if connection in self.handlers:
             del self.handlers[connection]
 

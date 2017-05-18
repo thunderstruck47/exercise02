@@ -4,7 +4,7 @@
 
 ## Create CSV file
 today=`date '+%Y_%m_%d__%H_%M_%S'`;
-duration="10s"
+duration="1s"
 filename="test0_$duration-$today"
 
 ## File headers
