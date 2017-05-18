@@ -42,7 +42,7 @@ from io import BytesIO
 
 class HttpHandler():
     """ TODO """
-    
+    DEBUG = False 
     # NOTE: HttpHandler is implemented as a State Machine with six stages,
     # three main stages and three sub-stages. The main stages (set below)
     # define states where we should check the buffer for data. Their use
@@ -124,12 +124,19 @@ class HttpHandler():
 
     def handle(self):
         """this class operates our state machine"""
+        self.finished = False
         # Recv data from socket
-        self.recv()
+        if not self.recv(): 
+            self.handle_connection()
+            return False
         # Check stage
         if self.__stage == self.STAGE1:
+            if self.DEBUG: print("-----STAGE 1-----")
             if self.status_line_recieved():
+                if self.DEBUG: print("Status line received:\r\n" \
+                        + self.__status_line.decode())
                 if self.status_line_parse():
+                    if self.DEBUG: print("Status line parsed")
                     if self.__version == 'HTTP/0.9':
                         self.queue_file()
                         self.handle_connection()
@@ -138,10 +145,19 @@ class HttpHandler():
                         self.__stage = self.STAGE2
                 #ekse error was sent
         if self.__stage == self.STAGE2:
+            if self.DEBUG: print("-----STAGE 2-----")
             if self.headers_recieved():
+                if self.DEBUG: print("Headers received:\r\n" + str(self.__headers))
                 if self.headers_parse():
+                    if self.DEBUG: print("Headers parsed")
                     self.queue_file()
+                    if self.DEBUG: 
+                        print("Queued files:" + str(self.response_queue.qsize()))
+                        #print(self.response_queue[0])
                     self.handle_connection()
+                    if self.DEBUG: 
+                        print("Close:" + str(self.close))
+                        print("Finished:" + str(self.finished))
                     # if self.__content_length = '0' or \
                     #        self.__content_length = '':
                     #   do prepare response
@@ -149,46 +165,50 @@ class HttpHandler():
                     #   do refresh()
                     #   do go_to_stage -1
                     #else goto next stage
-                    self.__stage = self.STAGE1 #3
+                    self.__stage = self.STAGE3 #3
                 else:
                     # error was send
+                    self.handle_connection()
                     self.__stage = self.STAGE1
         if self.__stage == self.STAGE3:
             self.refresh()
+            self.__stage = self.STAGE1
             pass
+        return True
 
     def recv(self):
         """returns void"""
         # Read until the socket blocks
+        if self.DEBUG: print("Receiving..")
         while True:
             try:
                 data = self.conn.recv(self.server.REQ_BUFFSIZE)
+                if self.DEBUG: print("Received data: \r\n" + data.decode())
                 if data: self.__input_buffer += data
                 else:
                 # XXX:client closed connection, should do more
-                    self.server.shutdown_connection(self.conn)
-                    break
+                    self.close = True
+                    return False
                 if len(data) < self.server.REQ_BUFFSIZE: break
             # Break the loop if EWOULDBLOCK
             except (socket.error, IOError) as e:
                 if e.errno == errno.EINTR: continue # retry recv call
                 elif e.errno != errno.EWOULDBLOCK: raise # should close connection
-                break #EWOULDBLOCK
+                return False #EWOULDBLOCK
+        return True
     
     def send(self):
         """returns void"""
         try:
             next_response = self.response_queue.get_nowait()
         except (queue.Empty):
-            pass
-            self.server.outputs.remove(self.conn)
-        except (KeyError):
-            pass
+            if self.DEBUG: print("Queue is empty")
+            return False
         else:
             # XXX: Needs error handling
             self.conn.send(next_response)
-            #print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), next_response.split('\r\n',1)[0], self.code))
-
+            #print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), next_response.decode().split('\r\n',1)[0], self.code))
+            return True
 
 
     def status_line_recieved(self):
@@ -211,8 +231,9 @@ class HttpHandler():
         """returns True if request is valid"""
         try:
             status_line = self.__status_line.decode()
-        except UnicodeDecodeError:
-            self.close = True
+        except Exception as e:
+            if self.DEBUG: print("Exception thrown: " + e)
+            self.finished = True
             return False
         status_line = status_line.split(' ')
         #print(status_line)
@@ -383,7 +404,7 @@ class HttpHandler():
         if self.__version != 'HTTP/0.9':
             if self.close: self.add_header('Connection','close')
             else: self.add_header('Connection','keep-alive')
-            self.add_header('Content-length','0')
+            self.add_header('Content-Length','0')
         self.add_end_header()
         self.queue_response()
         # TODO: Add message boyd
@@ -397,13 +418,16 @@ class HttpHandler():
         """adds a file to response queue"""
         try:
             with open(self.__path,'rb') as f:
-                f = f.read()
-                f = bytes(f)
                 self.add_response(200,'OK')
                 if self.__version != 'HTTP/0.9':
+                    size, mtime = self.get_file_info(f)
+                    self.add_header('Content-Length',str(size))
                     if self.close: self.add_header('Connection','close')
                     else: self.add_header('Connection','keep-alive')
-                self.__response += f
+                    self.add_header('Content-Type',self.get_file_type(self.__path))
+                self.add_end_header()
+                f = f.read()
+                self.__response += bytes(f)
                 self.queue_response()
         except IOError as e:
             self.send_error(500)
@@ -427,7 +451,7 @@ class HttpHandler():
 
     def add_header(self,name,value):
         # XXX: Should validate
-        self.__response += '{0}:{1}'.format(
+        self.__response += '{0}: {1}'.format(
                 name.strip(),value.strip()).encode()
         self.add_end_header()
     
@@ -496,12 +520,10 @@ class HttpHandler():
             self.write_code(self.code)
             self.wfile.write(b"Content-Length: 0\r\n\r\n")
     
-    def get_file_info(self, filepath):
-        f = open(filepath,'rb')
+    def get_file_info(self, f):
         fs = os.fstat(f.fileno())
         size = fs.st_size
         mtime = fs.st_mtime
-        f.close()
         return size, mtime
 
     def get_file_type(self, filepath):
@@ -541,7 +563,7 @@ class BaseServer(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.HOST, self.PORT))
-        self.socket.listen(5) # Should be set in confing / Test it
+        self.socket.listen(1024) # Should be set in confing / Test it
 
     def configure(self, filepath):
         # Defaults:
@@ -647,38 +669,41 @@ class NonBlockingServer(BaseServer):
             while self.inputs:
                 # Wait for at least one socket to be ready for processing
                 # Needs error handling (Keyboard Interrupt)
-                readable, writable, exceptional = select.select(self.inputs, self.outputs, self.inputs)   
+                r, w, e = select.select(self.inputs, self.outputs, self.inputs)   
 
                 # Handle inputs
-                for s in readable:
+                for s in r:
                     if s is self.socket:
                         # Server is ready to accept a connection
                         conn, addr = self.socket.accept()
                         # Set to non-blocking
-                        conn.setblocking(0)
+                        conn.setblocking(False)
                         self.inputs.append(conn)
-
-                        # Give the connection a queue for the handlers
                         self.handlers[conn] = HttpHandler(conn,self)
-                    else: # Read from connection
-                        # Creates a new HttpHandler object.
-                        # WARNING: Slows down persistent connections.
-                        # Needs to be managed differently.
+                    else:
                         handler = self.handlers[s]
-                        # Check if request was parsed successfuly
-                        handler.handle()
-                        self.outputs.append(s)
+                        if handler.handle():
+                            self.outputs.append(s)
+                        else:
+                            self.clear(s)
+                            if s in w:
+                                w.remove(s)
                 # Handle outputs
-                for s in writable:
+                for s in w:
                     handler = self.handlers[s]
-                    handler.send()
+                    if handler.send():
+                        self.outputs.remove(s)
                     if handler.finished:
                         self.clear(s)
+                    #else:
+                    #    self.outputs.remove(s) 
                 # Handle "exceptional conditions"
-                for s in exceptional:
+                for s in e:
                     self.clear(s)
+                #print (self.handlers)
 
         except KeyboardInterrupt:
+            #print(count)
             self.clear(self.socket)
 
     def clear(self,connection):
@@ -687,7 +712,6 @@ class NonBlockingServer(BaseServer):
         if connection in self.inputs:
             self.inputs.remove(connection)
         self.shutdown_connection(connection)
-
         if connection in self.handlers:
             del self.handlers[connection]
 
