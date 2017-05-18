@@ -17,6 +17,7 @@ import mimetypes
 import datetime
 import time
 import shutil
+from io import open
 # Non-blocking IO
 import select
 # Multiprocessing (not used)
@@ -42,7 +43,7 @@ from io import BytesIO
 
 class HttpHandler():
     """ TODO """
-    DEBUG = False 
+    DEBUG = False
     # NOTE: HttpHandler is implemented as a State Machine with six stages,
     # three main stages and three sub-stages. The main stages (set below)
     # define states where we should check the buffer for data. Their use
@@ -60,7 +61,7 @@ class HttpHandler():
     # SOURCE: https://svn.python.org/projects/python/trunk/Lib/socket.py
     def reset_buffer(self):
         """init and reset socket data buffer"""
-        self.__input_buffer = b''
+        self.__input_buffer = ''
    
    # Current request variables. When done, should be cleared with refresh()
     def refresh(self):
@@ -92,7 +93,7 @@ class HttpHandler():
     }
 
     # CRLF
-    __lt = b'\r\n'
+    __lt = '\r\n'
 
     # Populate MIME types dictionary
     if not mimetypes.inited: mimetypes.init() # try to read system mime.types
@@ -124,7 +125,7 @@ class HttpHandler():
 
     def handle(self):
         """this class operates our state machine"""
-        self.finished = False
+        #self.finished = False
         # Recv data from socket
         if not self.recv(): 
             self.handle_connection()
@@ -134,7 +135,7 @@ class HttpHandler():
             if self.DEBUG: print("-----STAGE 1-----")
             if self.status_line_recieved():
                 if self.DEBUG: print("Status line received:\r\n" \
-                        + self.__status_line.decode())
+                        + self.__status_line)
                 if self.status_line_parse():
                     if self.DEBUG: print("Status line parsed")
                     if self.__version == 'HTTP/0.9':
@@ -143,7 +144,10 @@ class HttpHandler():
                         self.__stage = self.STAGE1
                     else:
                         self.__stage = self.STAGE2
-                #ekse error was sent
+                #else:
+                    #print("handling")
+                    #self.handle_connection()
+                #error was sent
         if self.__stage == self.STAGE2:
             if self.DEBUG: print("-----STAGE 2-----")
             if self.headers_recieved():
@@ -153,22 +157,13 @@ class HttpHandler():
                     self.queue_file()
                     if self.DEBUG: 
                         print("Queued files:" + str(self.response_queue.qsize()))
-                        #print(self.response_queue[0])
                     self.handle_connection()
                     if self.DEBUG: 
                         print("Close:" + str(self.close))
                         print("Finished:" + str(self.finished))
-                    # if self.__content_length = '0' or \
-                    #        self.__content_length = '':
-                    #   do prepare response
-                    #   do queue response
-                    #   do refresh()
-                    #   do go_to_stage -1
-                    #else goto next stage
                     self.__stage = self.STAGE3 #3
                 else:
-                    # error was send
-                    self.handle_connection()
+                    #self.handle_connection()
                     self.__stage = self.STAGE1
         if self.__stage == self.STAGE3:
             self.refresh()
@@ -183,10 +178,10 @@ class HttpHandler():
         while True:
             try:
                 data = self.conn.recv(self.server.REQ_BUFFSIZE)
-                if self.DEBUG: print("Received data: \r\n" + data.decode())
-                if data: self.__input_buffer += data
+                #if self.DEBUG: print("Received data: \r\n" + data.decode())
+                if data: self.__input_buffer += data.decode()
                 else:
-                # XXX:client closed connection, should do more
+                # NOTE:client closed connection
                     self.close = True
                     return False
                 if len(data) < self.server.REQ_BUFFSIZE: break
@@ -196,6 +191,9 @@ class HttpHandler():
                 elif e.errno != errno.EWOULDBLOCK:
                     self.close = True
                     return False# should close connection
+            except (UnicodeDecodeError) as e:
+                self.close = True
+                return False
         return True
     
     def send(self):
@@ -230,12 +228,7 @@ class HttpHandler():
     
     def status_line_parse(self):
         """returns True if request is valid"""
-        try:
-            status_line = self.__status_line.decode()
-        except Exception as e:
-            if self.DEBUG: print("Exception thrown: " + e)
-            self.finished = True
-            return False
+        status_line = self.__status_line
         status_line = status_line.split(' ')
         #print(status_line)
         # HTTP/1.0 and HTTP/1.1
@@ -371,7 +364,7 @@ class HttpHandler():
         for line in self.__headers:
             #print(line)
             try:
-                f, v = [x.strip() for x in line.decode().split(':',1)]
+                f, v = [x.strip() for x in line.split(':',1)]
                 if f.lower() == 'connection':
                     if v.lower() == 'close':
                         connection = v.lower()
@@ -411,7 +404,7 @@ class HttpHandler():
         # TODO: Add message boyd
     
     def queue_response(self):
-        """adds current response to response queue"""
+        """adds current response to response queue and resets current vars"""
         self.response_queue.put(self.__response)
         self.refresh()
     
@@ -427,8 +420,7 @@ class HttpHandler():
                     else: self.add_header('Connection','keep-alive')
                     self.add_header('Content-Type',self.get_file_type(self.__path))
                 self.add_end_header()
-                f = f.read()
-                self.__response += bytes(f)
+                self.__response += f.read()
                 self.queue_response()
         except IOError as e:
             self.send_error(500)
@@ -457,7 +449,7 @@ class HttpHandler():
         self.add_end_header()
     
     def add_end_header(self):
-        self.__response += self.__lt
+        self.__response += self.__lt.encode()
 
     def server_string(self):
         """returns server name and version"""
@@ -646,6 +638,59 @@ class BaseServer(object):
             pass
         conn.close()
 
+class ForkingServer(BaseServer): 
+    def serve_persistent(self):
+        self.conn = None
+        self.connected = False
+        #self.close_connection = False
+        print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
+        signal.signal(signal.SIGCHLD, self.signal_handler)
+        try:
+            while True:
+                if self.connected:
+                    self.handler.handle()
+                    self.handler.send()
+                    if self.handler.close:
+                        self.conn.close()
+                        self.connected = False
+                        del self.handler
+                        os._exit(0)
+                else: 
+                    try:
+                        pair = self.socket.accept()
+                    except IOError as e:
+                        code, msg = e.args
+                        if code == errno.EINTR:
+                            continue
+                        else:
+                            raise
+                    if pair:
+                        self.conn, self.addr = pair
+                        try:
+                            pid = os.fork() # Needs error handling
+                        except OSError as e:
+                            if e.errno == errno.EINTR:
+                                pid = os.fork()
+                        if pid != 0: # Parent
+                            # close the file descriptor
+                            self.conn.close()
+                        else:
+                            self.socket.close()
+                            self.handler = HttpHandler(self.conn,self)
+                            self.connected = True
+        except KeyboardInterrupt:
+            if self.conn: self.conn.close()
+            self.socket.close()
+
+    def signal_handler(self, signum, frame):
+        while True:
+            try:
+                pid, status = os.waitpid(-1, os.WNOHANG)
+            except OSError:
+                return
+            if pid == 0:
+                return
+
 
 class NonBlockingServer(BaseServer):
     def __init__(self, config = "server.conf"):
@@ -686,7 +731,8 @@ class NonBlockingServer(BaseServer):
                             self.handlers[s] = HttpHandler(s,self)
                         handler = self.handlers[s]
                         if handler.handle():
-                            self.outputs.append(s)
+                            if s not in self.outputs:
+                                self.outputs.append(s)
                         else:
                             self.clear(s)
                             if s in w:
@@ -694,12 +740,11 @@ class NonBlockingServer(BaseServer):
                 # Handle outputs
                 for s in w:
                     handler = self.handlers[s]
-                    if handler.send():
-                        self.outputs.remove(s)
+                    handler.send()
+                    self.outputs.remove(s)
                     if handler.finished:
                         self.clear(s)
-                    #else:
-                    #    self.outputs.remove(s) 
+                        #self.outputs.remove(s) 
                 # Handle "exceptional conditions"
                 for s in e:
                     self.clear(s)
@@ -740,6 +785,6 @@ def test():
 
 
 if __name__ == "bistro":
+    #server = ForkingServer()
     server = NonBlockingServer()
     server.serve_persistent()
-    print("Bye")
