@@ -193,8 +193,9 @@ class HttpHandler():
             # Break the loop if EWOULDBLOCK
             except (socket.error, IOError) as e:
                 if e.errno == errno.EINTR: continue # retry recv call
-                elif e.errno != errno.EWOULDBLOCK: raise # should close connection
-                return False #EWOULDBLOCK
+                elif e.errno != errno.EWOULDBLOCK:
+                    self.close = True
+                    return False# should close connection
         return True
     
     def send(self):
@@ -563,7 +564,7 @@ class BaseServer(object):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.socket.bind((self.HOST, self.PORT))
-        self.socket.listen(1024) # Should be set in confing / Test it
+        self.socket.listen(20000) # Should be set in confing / Test it
 
     def configure(self, filepath):
         # Defaults:
@@ -679,8 +680,10 @@ class NonBlockingServer(BaseServer):
                         # Set to non-blocking
                         conn.setblocking(False)
                         self.inputs.append(conn)
-                        self.handlers[conn] = HttpHandler(conn,self)
+                        #self.handlers[conn] = HttpHandler(conn,self)
                     else:
+                        if s not in self.handlers:
+                            self.handlers[s] = HttpHandler(s,self)
                         handler = self.handlers[s]
                         if handler.handle():
                             self.outputs.append(s)
