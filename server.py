@@ -3,8 +3,11 @@
 TODO: About
 """
 
-__name__ = "bistro"
+__servername__ = "bistro"
+
 __version__ = "0.0.2"
+
+__all__ = [ "HttpHandler", "ForkingServer", "NonBlockingServer"]
 
 # Standard modules
 import socket
@@ -43,7 +46,7 @@ from io import BytesIO
 
 class HttpHandler():
     """ TODO """
-    DEBUG = False
+    DEBUG = True
     # NOTE: HttpHandler is implemented as a State Machine with six stages,
     # three main stages and three sub-stages. The main stages (set below)
     # define states where we should check the buffer for data. Their use
@@ -105,21 +108,24 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self,conn,server):
+    def __init__(self,conn=None,server=None):
         """conn stands for connection"""
-        self.server = server
-        self.conn = conn
-        self.addr = conn.getpeername()
+        if server: 
+            self.server = server
+            # XXX: validate?
+            if self.server.HTTP_VERSION == 1.1: self.version = 'HTTP/1.1'
+            elif self.server.HTTP_VERSION == 1.0: self.version = 'HTTP/1.0'
+            self.__version = self.version
+        if conn:
+            self.conn = conn
+            self.addr = conn.getpeername()
         self.close = True
         self.finished = False
         # Create current reques variables
         self.refresh()
         # Create input buffer
         self.reset_buffer()
-        # XXX: validate?
-        if self.server.HTTP_VERSION == 1.1: self.version = 'HTTP/1.1'
-        elif self.server.HTTP_VERSION == 1.0: self.version = 'HTTP/1.0'
-
+    
     def handle_connection(self):
         if self.close: self.finished = True
 
@@ -230,7 +236,7 @@ class HttpHandler():
         """returns True if request is valid"""
         status_line = self.__status_line
         status_line = status_line.split(' ')
-        #print(status_line)
+        print(status_line)
         # HTTP/1.0 and HTTP/1.1
         if len(status_line) == 3:
             self.__method, self.__path, self.__version = status_line
@@ -389,12 +395,7 @@ class HttpHandler():
 
     def send_error(self,code):
         """adds error to response queue"""
-        # TODO: Validate?
-        try:
-            message = self.__responses[code]
-        except KeyError:
-            message = '???'
-        self.add_response(code, message)
+        self.add_response(code)
         if self.__version != 'HTTP/0.9':
             if self.close: self.add_header('Connection','close')
             else: self.add_header('Connection','keep-alive')
@@ -425,9 +426,17 @@ class HttpHandler():
         except IOError as e:
             self.send_error(500)
 
-    def add_response(self, code, message):
+    def add_response(self, code, message = None):
         """writes response status code and default headers"""
+        # Validate code
+        if not isinstance(code, int): raise TypeError("\'{0}\' is not an integer. Must be an integer i.e. 200 or \'200\'".format(code))
         self.code = code
+        if code < 100 or code > 599: raise ValueError("\'{0}\' is invalid value. Must be in range [100,600)")
+        if not message:
+            try:
+                message = self.__responses[code]
+            except KeyError:
+                message = '???'
         if len(self.__response) != 0: self.refresh() # Possibly not needed
         if self.__version == 'HTTP/0.9':
             self.__response += '{0} {1}\r\n'.format(code,message).encode()
@@ -453,7 +462,7 @@ class HttpHandler():
 
     def server_string(self):
         """returns server name and version"""
-        return __name__ + '/' + __version__
+        return __servername__ + '/' + __version__
     
     def date_time_string(self):
         """returns current date time"""
@@ -545,7 +554,7 @@ class BaseServer(object):
     version_string = __version__
     name = __name__
 
-    def __init__(self, config_filename = "server.conf"):
+    def __init__(self, config_filename = "config"):
 
         # Reading settings from config file
         # CAUTION path/filename?
@@ -561,10 +570,7 @@ class BaseServer(object):
     def configure(self, filepath):
         # Defaults:
         self.HOST = ""
-        try:
-            self.PORT = 8000
-        except:
-            pass
+        self.PORT = 8000
         self.REQ_BUFFSIZE = 65536
         self.PUBLIC_DIR = "www"
         self.HTTP_VERSION = 1.0
@@ -693,7 +699,7 @@ class ForkingServer(BaseServer):
 
 
 class NonBlockingServer(BaseServer):
-    def __init__(self, config = "server.conf"):
+    def __init__(self, config = "config"):
         # Initializing base server config
         super(self.__class__, self).__init__(config)
 
@@ -787,7 +793,7 @@ def test():
         if handler.close: break
 
 
-if __name__ == "bistro":
+if __name__ == "__main__":
     #server = ForkingServer()
     server = NonBlockingServer()
     server.serve_persistent()

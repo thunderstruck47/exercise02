@@ -12,7 +12,6 @@ Get the code, edit the server.conf file (you can use the example config below) a
 ````
 git clone https://github.com/thunderstruck47/exercise02.git
 cd exercise02
-vim server.conf
 python2 server.py
 ````
 
@@ -44,8 +43,8 @@ index_files = index.html index.htm
 * ~~Handle zombie processes~~
 * ~~HTTP/1.1 and HTTP/0.9 support~~
 * ~~Basic CGI handling~~
-* Non-blocking IO (select)
+* [80%]Non-blocking IO (select)
 * Async (gevent or else)
 * Caching
-* Documentation
-* Testing
+* [5%]Documentation
+* [5%]Testing

@@ -7,8 +7,9 @@ www/upload.html
 www/uploads
 server_old.py
 s.py
-server_.py
-test.py
+__pycache__/
+_server.py
+_test.py
 tests/experimental
 tests/siege
 tests/a.sh
