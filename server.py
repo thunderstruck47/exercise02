@@ -69,7 +69,7 @@ class HttpHandler():
    # Current request variables. When done, should be cleared with refresh()
     def refresh(self):
         """init and reset current request variables"""
-        self.__status_line = b''
+        self.__status_line = ''
         self.__headers = []
         self.__response = b''
         self.__method = ''
@@ -110,6 +110,8 @@ class HttpHandler():
 
     def __init__(self,conn=None,server=None):
         """conn stands for connection"""
+        self.close = True
+        self.finished = False
         if server:
             self.response_queue = queue.Queue()
             self.server = server
@@ -120,31 +122,25 @@ class HttpHandler():
         if conn:
             self.conn = conn
             self.addr = conn.getpeername()
-        self.close = True
-        self.finished = False
         # Create current reques variables
         self.refresh()
         # Create input buffer
         self.reset_buffer()
-    
-    def handle_connection(self):
-        self.reset_buffer()
-        self.refresh()
-        if self.close:
-            self.finished = True
-    
+
     def finish(self):
-        if self.finished and self.response_queue.qsize() == 0:
-            self.server.clear(self.conn)
+        self.finished = True
+        self.__stage = self.STAGE1
 
     def handle(self):
         """this class operates our state machine"""
         #self.finished = False
         # Recv data from socket
         if not self.recv():
-            return False
+            self.close = True
+            return
         # Check stage
         if self.__stage == self.STAGE1:
+            self.finished = False
             if self.DEBUG: print("-----STAGE 1-----")
             if self.status_line_recieved():
                 if self.DEBUG: print("Status line received:\r\n" \
@@ -153,13 +149,11 @@ class HttpHandler():
                     if self.DEBUG: print("Status line parsed")
                     if self.__version == 'HTTP/0.9':
                         self.queue_file()
-                        self.handle_connection()
-                        self.__stage = self.STAGE1
+                        self.finish()
                     else:
                         self.__stage = self.STAGE2
-                #else:
-                    #print("handling")
-                    #self.handle_connection()
+                else:
+                    self.finish()
                 #error was sent
         if self.__stage == self.STAGE2:
             if self.DEBUG: print("-----STAGE 2-----")
@@ -170,18 +164,10 @@ class HttpHandler():
                     self.queue_file()
                     if self.DEBUG: 
                         print("Queued files:" + str(self.response_queue.qsize()))
-                    self.handle_connection()
                     if self.DEBUG: 
                         print("Close:" + str(self.close))
                         print("Finished:" + str(self.finished))
-                    self.__stage = self.STAGE1 #3
-                else:
-                    self.__stage = self.STAGE1
-        if self.__stage == self.STAGE3:
-            self.refresh()
-            self.__stage = self.STAGE1
-            pass
-        return True
+                self.finish()
 
     def recv(self):
         """returns void"""
@@ -243,7 +229,7 @@ class HttpHandler():
     
     def status_line_parse(self):
         """returns True if request is valid"""
-        status_line = self.__status_line
+        status_line = self.__status_line.strip()
         status_line = status_line.split(' ')
         #print(status_line)
         # HTTP/1.0 and HTTP/1.1
@@ -257,15 +243,12 @@ class HttpHandler():
             self.__method, self.__path = status_line
             if self.__method == 'GET' and self.validate_path(): \
                     return True
-            self.__version = self.version
             self.send_error(400)
         # Bad request
         else:
             # Reset protocol version
-            self.__version = self.version
             self.send_error(400)
         # Request is invalid
-        self.__version = self.version
         return False
 
     def validate_version(self,version = None):
@@ -448,7 +431,7 @@ class HttpHandler():
         else:
             # XXX: Should we switch versions?
             self.__response += '{0} {1} {2}\r\n'.format(
-                    self.__version,code,message).encode()
+                    self.version,code,message).encode()
             self.add_header('Date', self.date_time_string())
             self.add_header('Server', self.server_string())
             
@@ -743,18 +726,18 @@ class NonBlockingServer(BaseServer):
                         #if s not in self.handlers:
                         #    self.handlers[s] = HttpHandler(s,self)
                         handler = self.handlers[s]
-                        if handler.handle():
+                        handler.handle()
+                        if handler.finished:
                             if s not in self.outputs:
                                 self.outputs.append(s)
-                        else:
-                            if s in w:
-                                w.remove(s)
-                            self.clear(s)
                 # Handle outputs
                 for s in w:
                     handler = self.handlers[s]
                     if not handler.send():
-                        self.clear(s)
+                        # XXX: ?
+                        if s in self.inputs: self.outputs.remove(s)
+                        if handler.close:
+                            self.clear(s)
                    
                 # Handle "exceptional conditions"
                 for s in e:
@@ -776,27 +759,6 @@ class NonBlockingServer(BaseServer):
             pass
         if connection in self.handlers:
             del self.handlers[connection]
-
-def test():
-    server = ForkingServer()
-    conn, _ = server.socket.accept()
-    conn.setblocking(False)
-    handler = HttpHandler(conn,server)
-    while True:
-        r,w,e = select.select([conn],[],[])
-        handler.handle()
-        #print (handler.response_queue.qsize())
-        try:
-            r = handler.response_queue.get_nowait()
-        except (queue.Empty):
-            pass
-        except (KeyError):
-            pass
-        else:
-            conn.send(r)
-            #conn.send(r)
-        if handler.close: break
-
 
 if __name__ == "__main__":
     #server = ForkingServer()

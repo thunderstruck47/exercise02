@@ -4,5 +4,5 @@ host =
 port = 8000
 public_dir = www
 req_buffsize = 4092
-http_version = 1.0
+http_version = 1.1
 index_files = index.html
