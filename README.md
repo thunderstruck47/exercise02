@@ -12,7 +12,7 @@ Get the code, edit the server.conf file (you can use the example config below) a
 ````
 git clone https://github.com/thunderstruck47/exercise02.git
 cd exercise02
-python2 server.py
+python server.py
 ````
 
 ### Features

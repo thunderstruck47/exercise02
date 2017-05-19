@@ -4,7 +4,7 @@
 
 ## Create CSV file
 today=`date '+%Y_%m_%d__%H_%M_%S'`;
-duration="1s"
+duration="5s"
 filename="test0_$duration-$today"
 
 ## File headers
@@ -30,14 +30,14 @@ do
     ## RPS persistent (keep-alive):
     rpsPC=`ab -c $x -t $duration -k http://0.0.0.0:8000/ | grep 'Requests per second' | awk '{print $4}'`;
 
-    sleep 5s
+    sleep 1s
 
     ## RPS nonpersistent:
     rpsNPC=`ab -c $x -t $duration http://0.0.0.0:8000/ | grep 'Requests per second' | awk '{print $4}'`;
 
     ## Add to result
     echo "$x,$rpsPC,$rpsNPC" >> data/$filename.csv
-    sleep 5s
+    sleep 1s
 done
 
 ## Gnuplot config and plotting

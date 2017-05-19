@@ -46,7 +46,7 @@ from io import BytesIO
 
 class HttpHandler():
     """ TODO """
-    DEBUG = True
+    DEBUG = False
     # NOTE: HttpHandler is implemented as a State Machine with six stages,
     # three main stages and three sub-stages. The main stages (set below)
     # define states where we should check the buffer for data. Their use
@@ -80,7 +80,7 @@ class HttpHandler():
         self.__stage = self.STAGE1
     
     # The outgoing message queue
-    response_queue = queue.Queue()
+    #response_queue = queue.Queue()
     # List of supported methods and a dictionarry of supported response codes
     __supported_methods = ['GET', 'HEAD', 'POST']
     __responses = {
@@ -110,7 +110,8 @@ class HttpHandler():
 
     def __init__(self,conn=None,server=None):
         """conn stands for connection"""
-        if server: 
+        if server:
+            self.response_queue = queue.Queue()
             self.server = server
             # XXX: validate?
             if self.server.HTTP_VERSION == 1.1: self.version = 'HTTP/1.1'
@@ -127,14 +128,20 @@ class HttpHandler():
         self.reset_buffer()
     
     def handle_connection(self):
-        if self.close: self.finished = True
+        self.reset_buffer()
+        self.refresh()
+        if self.close:
+            self.finished = True
+    
+    def finish(self):
+        if self.finished and self.response_queue.qsize() == 0:
+            self.server.clear(self.conn)
 
     def handle(self):
         """this class operates our state machine"""
         #self.finished = False
         # Recv data from socket
-        if not self.recv(): 
-            self.handle_connection()
+        if not self.recv():
             return False
         # Check stage
         if self.__stage == self.STAGE1:
@@ -167,9 +174,8 @@ class HttpHandler():
                     if self.DEBUG: 
                         print("Close:" + str(self.close))
                         print("Finished:" + str(self.finished))
-                    self.__stage = self.STAGE3 #3
+                    self.__stage = self.STAGE1 #3
                 else:
-                    #self.handle_connection()
                     self.__stage = self.STAGE1
         if self.__stage == self.STAGE3:
             self.refresh()
@@ -211,7 +217,10 @@ class HttpHandler():
             return False
         else:
             # XXX: Needs error handling
-            self.conn.send(next_response)
+            try:
+                self.conn.send(next_response)
+            except:
+                pass
             #print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), next_response.decode().split('\r\n',1)[0], self.code))
             return True
 
@@ -236,7 +245,7 @@ class HttpHandler():
         """returns True if request is valid"""
         status_line = self.__status_line
         status_line = status_line.split(' ')
-        print(status_line)
+        #print(status_line)
         # HTTP/1.0 and HTTP/1.1
         if len(status_line) == 3:
             self.__method, self.__path, self.__version = status_line
@@ -349,10 +358,6 @@ class HttpHandler():
         """returns True if headers were received"""
         # FIXME: Should validate headers, ignore bad headers, or send 400
         try:
-            #if self.__input_buffer.startswith(b'\r\n'):
-            #    #self.__input_buffer.lstrip(b'\r\n')
-            #    print("asd")
-            #    return True
             while True:
                 header, self.__input_buffer = \
                         self.__input_buffer.split(self.__lt, 1)
@@ -718,6 +723,7 @@ class NonBlockingServer(BaseServer):
     def serve_persistent(self):
         print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
         try:
+            count = 0
             while self.inputs:
                 # Wait for at least one socket to be ready for processing
                 # Needs error handling (Keyboard Interrupt)
@@ -732,6 +738,7 @@ class NonBlockingServer(BaseServer):
                         conn.setblocking(False)
                         self.inputs.append(conn)
                         self.handlers[conn] = HttpHandler(conn,self)
+                        count += 1
                     else:
                         #if s not in self.handlers:
                         #    self.handlers[s] = HttpHandler(s,self)
@@ -740,22 +747,20 @@ class NonBlockingServer(BaseServer):
                             if s not in self.outputs:
                                 self.outputs.append(s)
                         else:
-                            self.clear(s)
                             if s in w:
                                 w.remove(s)
+                            self.clear(s)
                 # Handle outputs
                 for s in w:
                     handler = self.handlers[s]
-                    handler.send()
-                    self.outputs.remove(s)
-                    if handler.finished:
+                    if not handler.send():
                         self.clear(s)
-                        #self.outputs.remove(s) 
+                   
                 # Handle "exceptional conditions"
                 for s in e:
                     self.clear(s)
                 #print (self.handlers)
-
+            print(count)
         except KeyboardInterrupt:
             #print(count)
             self.clear(self.socket)
