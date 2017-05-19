@@ -133,10 +133,10 @@ class HttpHandler():
 
     def handle(self):
         """this class operates our state machine"""
-        #self.finished = False
         # Recv data from socket
         if not self.recv():
             self.close = True
+            self.finish()
             return
         # Check stage
         if self.__stage == self.STAGE1:
@@ -706,7 +706,7 @@ class NonBlockingServer(BaseServer):
 
         # Current handlers queue (HttpHandler:Queue)
         self.handlers = {}
-
+    #@profile
     def serve_persistent(self):
         print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
         try:
@@ -714,8 +714,9 @@ class NonBlockingServer(BaseServer):
             while self.inputs:
                 # Wait for at least one socket to be ready for processing
                 # Needs error handling (Keyboard Interrupt)
-                r, w, e = select.select(self.inputs, self.outputs, self.inputs)   
-
+                r, w, e = select.select(self.inputs, self.outputs, self.inputs)
+                #print("r: " + str(r))
+                #print("w: " + str(w))
                 # Handle inputs
                 for s in r:
                     if s is self.socket:
@@ -734,13 +735,17 @@ class NonBlockingServer(BaseServer):
                         if handler.finished:
                             if s not in self.outputs:
                                 self.outputs.append(s)
+                            if handler.response_queue.qsize() == 0 and \
+                                    handler.close:
+                                self.clear(s)
+                                if s in w: w.remove(s)
                 # Handle outputs
                 for s in w:
                     handler = self.handlers[s]
                     if not handler.send():
                         # XXX: ?
-                        if s in self.inputs: self.outputs.remove(s)
-                        if handler.close:
+                        self.outputs.remove(s)
+                        if handler.finished and handler.close:
                             self.clear(s)
                    
                 # Handle "exceptional conditions"
@@ -764,7 +769,10 @@ class NonBlockingServer(BaseServer):
         if connection in self.handlers:
             del self.handlers[connection]
 
-if __name__ == "__main__":
+def test():
     #server = ForkingServer()
     server = NonBlockingServer()
     server.serve_persistent()
+
+if __name__ == "__main__":
+    test()

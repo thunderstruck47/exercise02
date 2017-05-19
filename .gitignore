@@ -1,6 +1,7 @@
 *.un~
 *~
 *.swp
+*.lprof
 www/cs.html
 www/sari.html
 www/upload.html
