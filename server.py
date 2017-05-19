@@ -149,7 +149,7 @@ class HttpHandler():
                     if self.DEBUG: print("Status line parsed")
                     if self.__version == 'HTTP/0.9':
                         self.queue_file()
-                        self.finish()
+                        self.finish() #Should be moved to queue_file and send_error (calle it queue_error)
                     else:
                         self.__stage = self.STAGE2
                 else:
@@ -160,14 +160,19 @@ class HttpHandler():
             if self.headers_recieved():
                 if self.DEBUG: print("Headers received:\r\n" + str(self.__headers))
                 if self.headers_parse():
-                    if self.DEBUG: print("Headers parsed")
-                    self.queue_file()
-                    if self.DEBUG: 
-                        print("Queued files:" + str(self.response_queue.qsize()))
-                    if self.DEBUG: 
-                        print("Close:" + str(self.close))
-                        print("Finished:" + str(self.finished))
-                self.finish()
+                    if self.__cgi:
+                        self.queue_cgi()
+                    else:
+                        if self.DEBUG: print("Headers parsed")
+                        self.queue_file()
+                        if self.DEBUG: 
+                            print("Queued files:" + str(self.response_queue.qsize()))
+                        if self.DEBUG: 
+                            print("Close:" + str(self.close))
+                            print("Finished:" + str(self.finished))
+                        self.finish()
+                else:
+                    self.finish()
 
     def recv(self):
         """returns void"""
@@ -249,6 +254,7 @@ class HttpHandler():
             # Reset protocol version
             self.send_error(400)
         # Request is invalid
+        self.close = True
         return False
 
     def validate_version(self,version = None):
@@ -281,7 +287,7 @@ class HttpHandler():
     def validate_method(self,method = None):
         if not method: method = self.__method
         if method not in self.__supported_methods:
-            self.send_error(400)
+            self.send_error(501)
             return False
         return True
  
@@ -396,6 +402,7 @@ class HttpHandler():
         """adds current response to response queue and resets current vars"""
         self.response_queue.put(self.__response)
         self.refresh()
+        self.finish()
     
     def queue_file(self):
         """adds a file to response queue"""
@@ -409,7 +416,7 @@ class HttpHandler():
                     else: self.add_header('Connection','keep-alive')
                     self.add_header('Content-Type',self.get_file_type(self.__path))
                 self.add_end_header()
-                self.__response += f.read()
+                if self.__method != 'HEAD': self.__response += f.read()
                 self.queue_response()
         except IOError as e:
             self.send_error(500)
@@ -476,39 +483,36 @@ class HttpHandler():
     # _________________________________________________________________________
     # _________________________________________________________________________
     # _________________________________________________________________________
-    def handle_cgi(self, path):
+    def queue_cgi(self, path = None):
+        if not path: path = self.__path
         env = {}
         env["SERVER_NAME"] = self.server.name
         env["SERVER_SOFTWARE"] = self.server.version_string
         env["GATEWAY_INTERFACE"] = "CGI/1.1"
         env["SERVER_PROTOCOL"] = self.version
         env["SERVER_PORT"] = str(self.server.PORT)
-        env["REQUEST_METHOD"] = self.method
+        env["REQUEST_METHOD"] = self.__method
         env["REMOTE_ADDR"] = str(self.addr[0])
         env["REMOTE_PORT"] = str(self.addr[1])
-        env["QUERY_STRING"] = self.query_string
+        env["QUERY_STRING"] = self.__query_string
         env["PATH_INFO"] = path
-        env["SCRIPT_NAME"] = self.filename
-        env["CONTENT_LENGTH"] = str(self.content_length)
-        env["CONTENT_TYPE"] = self.content_type
+        env["SCRIPT_NAME"] = self.__filename
+        env["CONTENT_LENGTH"] = str(self.__content_length)
+        #env["CONTENT_TYPE"] = self.__content_type
 
         try:
             process = subprocess.Popen(["./" + path], stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, env = env)
-            if self.m_body: stdin = self.m_body
-            else: stdin = ""
+            stdin = ""
             (output, err) = process.communicate(stdin)
             exit_code = process.wait()
             if exit_code == 1 or err:
                 print("ERROR calling \"{0}\":\r\n {1}".format(env["SCRIPT_NAME"],err.decode()))
                 raise Exception
-            self.write_code(self.code)
-            self.wfile.write("Date: {0}\r\n".format(self.httpdate(datetime.datetime.utcnow())).encode())
-            self.wfile.write("Server: {0}\r\n".format("Bistro/" + __version__).encode())
-            self.wfile.write(output)
+            self.add_response(200)
+            self.__response += output
+            self.queue_response()
         except Exception:
-            self.code = 500
-            self.write_code(self.code)
-            self.wfile.write(b"Content-Length: 0\r\n\r\n")
+            self.send_error(500)
     
     def get_file_info(self, f):
         fs = os.fstat(f.fileno())
