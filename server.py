@@ -50,7 +50,7 @@ class HttpHandler():
     # define states where we should check the buffer for data. Their use
     # is to answer the questions - Is status line recieved?, Are headers
     # recieved?, Is the body recieved? - represented by the methods - 
-    # status_line_recieved(), headers_recieved(), body_recieved(). The
+    # status_line_recieved(), headers_recieved(), body_received(). The
     # minor stages are used to process the respective part of the request.
     STAGE1 = -1
     STAGE2 = 0
@@ -69,6 +69,7 @@ class HttpHandler():
         """init and reset current request variables"""
         self.__status_line = ''
         self.__headers = []
+        self.__body = b''
         self.__response = b''
         self.__method = ''
         self.__path = ''
@@ -160,7 +161,10 @@ class HttpHandler():
                 if __debug__: print("Headers received:\r\n" + str(self.__headers))
                 if self.headers_parse():
                     if self.__cgi:
-                        self.queue_cgi()
+                        if self.__method == 'POST' and self.__content_length != '' and self.__content_length != '0':
+                            self.__stage = self.STAGE3
+                        else:
+                            self.queue_cgi()
                     else:
                         if __debug__: print("Headers parsed")
                         self.queue_file()
@@ -171,6 +175,27 @@ class HttpHandler():
                         self.finish()
                 else:
                     self.finish()
+        if self.__stage == self.STAGE3:
+            if __debug__: print("------STAGE 3------")
+            if self.body_received():
+                if __debug__: print("Body received:\r\n" + str(self.__body))
+                self.queue_cgi()
+            else:
+                self.finish()
+
+    def body_received(self):
+        try:
+            print(self.__content_length)
+            print(self.__input_buffer)
+            # XXX: Better slicing?
+            l = int(self.__content_length)
+            self.__body = self.__input_buffer[0:l] # XXX:l+1?
+            if len(self.__body) < l: raise ValueError
+            self.__input_buffer = self.__input_buffer[l:] 
+            return True
+        except ValueError:
+            return False
+
 
     def recv(self):
         """returns void"""
@@ -208,9 +233,11 @@ class HttpHandler():
             # XXX: Needs error handling
             try:
                 self.conn.send(next_response)
-            except:
+                #if __debug__: 
+                    #print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), next_response.decode().split('\r\n',1)[0], self.code)) 
+            except (socket.error) as e:
+                print(e)
                 pass
-            #print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), next_response.decode().split('\r\n',1)[0], self.code))
             return True
 
     #@profile
@@ -306,11 +333,8 @@ class HttpHandler():
             self.__query_string = path[1]
         except:
             self.__query_string = ''
-        #print(self.__query_string)
         path = path[0]
-        #path = os.path.abspath(path)
         path = self.server.PUBLIC_DIR + path
-        #print(path)
         # CGI?
         # FIXME: Replace input with configurable i.e. CGIDIR, DIRCGI, CGIPATH
         if path.startswith(self.server.PUBLIC_DIR + "/cgi-bin/"):
@@ -504,7 +528,8 @@ class HttpHandler():
 
         try:
             process = subprocess.Popen(["./" + path], stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, env = env)
-            stdin = ""
+            if self.__body: stdin = self.__body.encode()
+            else: stdin = b''
             (output, err) = process.communicate(stdin)
             exit_code = process.wait()
             if exit_code == 1 or err:
@@ -514,6 +539,7 @@ class HttpHandler():
             self.__response += output
             self.queue_response()
         except Exception:
+            raise
             self.send_error(500)
     
     def get_file_info(self, f):
