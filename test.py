@@ -4,21 +4,12 @@ import server
 import socket
 
 class UnitTest(unittest.TestCase):
-    DEBUG = True
 
     def setUp(self):
         self.server = server.NonBlockingServer()
         self.server.socket.close()
         self.server.PUBLIC_DIR = 'www'
         self.handler = server.HttpHandler(server = self.server)
-        self.set_debug(True)
-
-    def set_debug(self,value):
-        if isinstance(value,bool): self.DEBUG = value
-        else: raise ValueError
-
-    def _print(self,value):
-        if self.DEBUG: print(value)
     
     def test_validate_version(self):
         valid = ['HTTP/1.1', 'HTTP/1.0']
@@ -33,12 +24,12 @@ class UnitTest(unittest.TestCase):
         #print("Testing supported methods:")
         for method in ['GET','POST','HEAD']:
             #print("Testing " + method)
-            self.assertEqual(self.handler.validate_method(method), True, 'Testing with method ' + method + ': FAILED')
+            self.assertTrue(self.handler.validate_method(method), 'Testing with method ' + method + ': FAILED')
     def test_validate_path(self):
         valid_paths = ['/','/cgi-bin/script.py','/data.json/']
         invalid_paths = ['\\','/cgi-bin/','/cgi-bin','index.html','/index.tml']
         for path in valid_paths:
-            self.assertEqual(self.handler.validate_path(path), True, 'path: ' + path + ' should be valid')
+            self.assertTrue(self.handler.validate_path(path), 'path: ' + path + ' should be valid')
         for path in invalid_paths:
             self.assertFalse(self.handler.validate_path(path), 'path \'' + path + '\' should be invalid')
     

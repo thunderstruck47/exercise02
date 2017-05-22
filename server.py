@@ -42,11 +42,9 @@ except ImportError:
 #    from cStringIO import StringIO
 #except ImportError:
 #    from StringIO import StringIO
-from io import BytesIO
 
 class HttpHandler():
     """ TODO """
-    DEBUG = False
     # NOTE: HttpHandler is implemented as a State Machine with six stages,
     # three main stages and three sub-stages. The main stages (set below)
     # define states where we should check the buffer for data. Their use
@@ -131,6 +129,7 @@ class HttpHandler():
         self.finished = True
         self.__stage = self.STAGE1
 
+    #@profile
     def handle(self):
         """this class operates our state machine"""
         # Recv data from socket
@@ -141,12 +140,12 @@ class HttpHandler():
         # Check stage
         if self.__stage == self.STAGE1:
             self.finished = False
-            if self.DEBUG: print("-----STAGE 1-----")
+            if __debug__: print("-----STAGE 1-----")
             if self.status_line_recieved():
-                if self.DEBUG: print("Status line received:\r\n" \
+                if __debug__: print("Status line received:\r\n" \
                         + self.__status_line)
                 if self.status_line_parse():
-                    if self.DEBUG: print("Status line parsed")
+                    if __debug__: print("Status line parsed")
                     if self.__version == 'HTTP/0.9':
                         self.queue_file()
                         self.finish() #Should be moved to queue_file and send_error (calle it queue_error)
@@ -156,18 +155,17 @@ class HttpHandler():
                     self.finish()
                 #error was sent
         if self.__stage == self.STAGE2:
-            if self.DEBUG: print("-----STAGE 2-----")
+            if __debug__: print("-----STAGE 2-----")
             if self.headers_recieved():
-                if self.DEBUG: print("Headers received:\r\n" + str(self.__headers))
+                if __debug__: print("Headers received:\r\n" + str(self.__headers))
                 if self.headers_parse():
                     if self.__cgi:
                         self.queue_cgi()
                     else:
-                        if self.DEBUG: print("Headers parsed")
+                        if __debug__: print("Headers parsed")
                         self.queue_file()
-                        if self.DEBUG: 
-                            print("Queued files:" + str(self.response_queue.qsize()))
-                        if self.DEBUG: 
+                        if __debug__: 
+                            print("Queued files:" + str(self.response_queue.qsize())) 
                             print("Close:" + str(self.close))
                             print("Finished:" + str(self.finished))
                         self.finish()
@@ -177,11 +175,11 @@ class HttpHandler():
     def recv(self):
         """returns void"""
         # Read until the socket blocks
-        if self.DEBUG: print("Receiving..")
+        if __debug__: print("Receiving..")
         while True:
             try:
                 data = self.conn.recv(self.server.REQ_BUFFSIZE)
-                #if self.DEBUG: print("Received data: \r\n" + data.decode())
+                #if __debug__: print("Received data: \r\n" + data.decode())
                 if data: self.__input_buffer += data.decode()
                 else:
                 # NOTE:client closed connection
@@ -204,7 +202,7 @@ class HttpHandler():
         try:
             next_response = self.response_queue.get_nowait()
         except (queue.Empty):
-            if self.DEBUG: print("Queue is empty")
+            if __debug__: print("Queue is empty")
             return False
         else:
             # XXX: Needs error handling
@@ -215,7 +213,7 @@ class HttpHandler():
             #print("{0}:{1} - - [{2}] \"{3}\" {4} -".format(self.addr[0], self.addr[1], time.strftime("%d/%m/%Y %H:%M:%S", time.localtime()), next_response.decode().split('\r\n',1)[0], self.code))
             return True
 
-
+    #@profile
     def status_line_recieved(self):
         """returns True if status line was recieved"""
         try:
@@ -232,6 +230,7 @@ class HttpHandler():
                 self.reset_buffer()
             return False
     
+    #@profile
     def status_line_parse(self):
         """returns True if request is valid"""
         status_line = self.__status_line.strip()
@@ -256,7 +255,8 @@ class HttpHandler():
         # Request is invalid
         self.close = True
         return False
-
+    
+    #@profile
     def validate_version(self,version = None):
         # NOTE: Useful for unit testing later on
         if not version: version = self.__version
@@ -283,14 +283,14 @@ class HttpHandler():
         if version == "HTTP/1.1": # Change default close
             self.close = False
         return True
-
+    #@profile
     def validate_method(self,method = None):
         if not method: method = self.__method
         if method not in self.__supported_methods:
             self.send_error(501)
             return False
         return True
- 
+    #@profile
     def validate_path(self,path = None):
         if not path: path = self.__path
         # FIXME: Losely based on previous version - needs error handling!
@@ -308,7 +308,7 @@ class HttpHandler():
             self.__query_string = ''
         #print(self.__query_string)
         path = path[0]
-        path = os.path.abspath(path)
+        #path = os.path.abspath(path)
         path = self.server.PUBLIC_DIR + path
         #print(path)
         # CGI?
@@ -322,7 +322,9 @@ class HttpHandler():
         # Directory?
         if os.path.isdir(path):
             for index in self.server.INDEX_FILES:
-                index = os.path.join(path, index)
+                #index = os.path.join(path, index) #TOO SLOW
+                if path.endswith("/"): index = path + index
+                else: index = path + "/" + index
                 if os.path.isfile(index):
                     path = index
                     break
@@ -342,7 +344,7 @@ class HttpHandler():
         self.send_error(404)
         return False
  
-
+    #@profile
     def headers_recieved(self):
         """returns True if headers were received"""
         # FIXME: Should validate headers, ignore bad headers, or send 400
@@ -355,7 +357,7 @@ class HttpHandler():
             return True
         except ValueError:
             return False
-    
+    #@profile
     def headers_parse(self):
         # XXX: Currently ignores badly formed request headers
         # FIXME: Should close connection in HTTP/1.0 unless keep-alive was
@@ -386,7 +388,7 @@ class HttpHandler():
                 self.close = True
             else: self.close = False # HTTP/1.1
         return True
-
+    
     def send_error(self,code):
         """adds error to response queue"""
         self.add_response(code)
@@ -403,7 +405,7 @@ class HttpHandler():
         self.response_queue.put(self.__response)
         self.refresh()
         self.finish()
-    
+    #@profile
     def queue_file(self):
         """adds a file to response queue"""
         try:
@@ -714,7 +716,7 @@ class NonBlockingServer(BaseServer):
             while self.inputs:
                 # Wait for at least one socket to be ready for processing
                 # Needs error handling (Keyboard Interrupt)
-                r, w, e = select.select(self.inputs, self.outputs, self.inputs)
+                r, w, e = select.select(self.inputs, self.outputs, self.inputs,0.5)
                 #print("r: " + str(r))
                 #print("w: " + str(w))
                 # Handle inputs
