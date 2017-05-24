@@ -43,7 +43,7 @@ index_files = index.html index.htm
 * ~~Handle zombie processes~~
 * ~~HTTP/1.1 and HTTP/0.9 support~~
 * ~~Basic CGI handling~~
-* [80%]Non-blocking IO (select)
+* [95%]Non-blocking IO (select)
 * Async (gevent or else)
 * Caching
 * [5%]Documentation
