@@ -21,10 +21,11 @@ class UnitTest(unittest.TestCase):
         
 
     def test_validate_method(self):
-        #print("Testing supported methods:")
         for method in ['GET','POST','HEAD']:
-            #print("Testing " + method)
             self.assertTrue(self.handler.validate_method(method), 'Testing with method ' + method + ': FAILED')
+        for invalid_method in ['get',0.1,int,1,[],'PUT','DELETE','CONNECT','OPTIONS','TRACE','PATCH']:
+            self.assertFalse(self.handler.validate_method(invalid_method), 'Testing with invalid method ' + str(invalid_method) + ': FAILED')
+    
     def test_validate_path(self):
         valid_paths = ['/','/cgi-bin/script.py','/data.json/']
         invalid_paths = ['\\','/cgi-bin/','/cgi-bin','index.html','/index.tml']
