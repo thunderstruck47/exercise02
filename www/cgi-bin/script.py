@@ -22,7 +22,7 @@ if os.environ["REQUEST_METHOD"]=="POST" and os.environ["CONTENT_LENGTH"]!="0" an
     body += "<h3>Request body:</h3><p>" + sys.stdin.read() + "</p>\r\n"
 
 # Calculate the size of the response
-size = len(body.encode('utf-8')) + 1 # +1, else chrome interrupts connection
+size = len(body) + 1 # +1, else chrome interrupts connection
 
 # Response:
 print("Content-Type: text/html",end = "\r\n")

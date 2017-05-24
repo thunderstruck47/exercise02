@@ -62,7 +62,7 @@ class HttpHandler():
     # SOURCE: https://svn.python.org/projects/python/trunk/Lib/socket.py
     def reset_buffer(self):
         """init and reset socket data buffer"""
-        self.__input_buffer = ''
+        self.__input_buffer = b''
    
    # Current request variables. When done, should be cleared with refresh()
     def refresh(self):
@@ -204,8 +204,13 @@ class HttpHandler():
         while True:
             try:
                 data = self.conn.recv(self.server.REQ_BUFFSIZE)
-                #if __debug__: print("Received data: \r\n" + data.decode())
-                if data: self.__input_buffer += data.decode()
+                if __debug__: print("Received data: \r\n{}".format(str(data)))
+                # NOTE: Handles telnet termination character
+                # XXX: Should probably have a mechanism inside this method  to 
+                # detect invalid queries if \r\n was not reached 
+                data = data if data != b'\xff\xf4\xff\xfd\x06' else None
+                if data:
+                    self.__input_buffer += data
                 else:
                 # NOTE:client closed connection
                     self.close = True
@@ -217,9 +222,6 @@ class HttpHandler():
                 elif e.errno != errno.EWOULDBLOCK:
                     self.close = True
                     return False# should close connection
-            except (UnicodeDecodeError) as e:
-                self.close = True
-                return False
         return True
     
     def send(self):
@@ -245,7 +247,8 @@ class HttpHandler():
         """returns True if status line was recieved"""
         try:
             self.__status_line, self.__input_buffer = \
-                    self.__input_buffer.split(self.__lt,1)
+                    self.__input_buffer.split(self.__lt.encode('utf-8'),1)
+            self.__status_line = self.__status_line.decode('utf-8')
             return True
         except ValueError:
             # XXX: should be a different value i.e.: 
@@ -375,9 +378,9 @@ class HttpHandler():
         try:
             while True:
                 header, self.__input_buffer = \
-                        self.__input_buffer.split(self.__lt, 1)
+                        self.__input_buffer.split(self.__lt.encode('utf-8'), 1)
                 if not header: break
-                self.__headers.append(header)
+                self.__headers.append(header.decode('utf-8'))
             return True
         except ValueError:
             return False
@@ -460,11 +463,11 @@ class HttpHandler():
                 message = '???'
         if len(self.__response) != 0: self.refresh() # Possibly not needed
         if self.__version == 'HTTP/0.9':
-            self.__response += '{0} {1}\r\n'.format(code,message).encode()
+            self.__response += '{0} {1}\r\n'.format(code,message).encode('utf-8')
         else:
             # XXX: Should we switch versions?
             self.__response += '{0} {1} {2}\r\n'.format(
-                    self.version,code,message).encode()
+                    self.version,code,message).encode('utf-8')
             self.add_header('Date', self.date_time_string())
             self.add_header('Server', self.server_string())
             
@@ -475,11 +478,11 @@ class HttpHandler():
     def add_header(self,name,value):
         # XXX: Should validate
         self.__response += '{0}: {1}'.format(
-                name.strip(),value.strip()).encode()
+                name.strip(),value.strip()).encode('utf-8')
         self.add_end_header()
     
     def add_end_header(self):
-        self.__response += self.__lt.encode()
+        self.__response += self.__lt.encode('utf-8')
 
     def server_string(self):
         """returns server name and version"""
@@ -528,7 +531,7 @@ class HttpHandler():
 
         try:
             process = subprocess.Popen(["./" + path], stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, env = env)
-            if self.__body: stdin = self.__body.encode()
+            if self.__body: stdin = self.__body
             else: stdin = b''
             (output, err) = process.communicate(stdin)
             exit_code = process.wait()
