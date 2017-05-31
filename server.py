@@ -9,6 +9,9 @@ __version__ = "0.0.2"
 
 __all__ = [ "HttpHandler", "ForkingServer", "NonBlockingServer"]
 
+# gevent test
+from gevent.server import StreamServer
+
 # Standard modules
 import socket
 import os
@@ -447,6 +450,7 @@ class HttpHandler():
                 self.add_end_header()
                 if self.__method != 'HEAD': self.__response += f.read()
                 self.queue_response()
+        # XXX: OSError, etc.?
         except IOError as e:
             self.send_error(500)
 
@@ -742,6 +746,7 @@ class NonBlockingServer(BaseServer):
         print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
         try:
             count = 0
+            completed = 0
             while self.inputs:
                 # Wait for at least one socket to be ready for processing
                 # Needs error handling (Keyboard Interrupt)
@@ -777,6 +782,7 @@ class NonBlockingServer(BaseServer):
                         # XXX: ?
                         self.outputs.remove(s)
                         if handler.finished and handler.close:
+                            completed += 1
                             self.clear(s)
                    
                 # Handle "exceptional conditions"
@@ -785,7 +791,8 @@ class NonBlockingServer(BaseServer):
                 #print (self.handlers)
             print(count)
         except KeyboardInterrupt:
-            #print(count)
+            print(count)
+            print(completed)
             self.clear(self.socket)
 
     def clear(self,connection):
@@ -800,10 +807,23 @@ class NonBlockingServer(BaseServer):
         if connection in self.handlers:
             del self.handlers[connection]
 
+class geventServer(StreamServer, BaseServer):
+        def __init__(self,listener, handle = None, spawn = 'default', config = 'config'):
+            super(BaseServer, self).__init__()
+            super(StreamServer, self).__init__(listener, handle, spawn)
+
+def handle(s,a):
+    print("New connection")
+    handler = HttpHandler(s, BaseServer())
+    print(handler)
+    while True:
+        print(s.recv(800))
+
 def test():
     #server = ForkingServer()
-    server = NonBlockingServer()
-    server.serve_persistent()
-
+    #server = NonBlockingServer()
+    #server.serve_persistent()
+    g = StreamServer(("localhost",8010), handle = handle)
+    g.serve_forever()
 if __name__ == "__main__":
     test()

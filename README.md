@@ -45,6 +45,8 @@ index_files = index.html index.htm
 * ~~Basic CGI handling~~
 * [95%]Non-blocking IO (select)
 * Async (gevent or else)
+* Support for multiple transfer encodings
+* Support for multiple charsets
 * Caching
 * [5%]Documentation
 * [5%]Testing
