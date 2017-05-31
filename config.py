@@ -1,0 +1,96 @@
+""" Config module
+
+Used to parse, store and handle configuration properties
+"""
+
+import os
+import sys
+
+# Get the right config parser
+if sys.version_info > (3, 0): import configparser
+else: import ConfigParser
+
+
+__all__ = [ "Config" ]
+
+class Config(object):
+    """Configuration helper"""
+    def __init__(self):
+        self._properties = {}
+    
+    def set(self, key, value):
+        self._properties[key] = value
+    
+    def get(self, key, default = None):
+        return self._properties.get(key, default)
+    
+    def print(self):
+        """Prints property value pairs for each defined property"""
+        for key in self._properties:
+            print("{:<20} {}".format(key,self.get(key)))
+
+    def defaults(self):
+        self.set('HOST','')
+        self.set('PORT',8000)
+        self.set('REQ_BUFFSIZE',4096)
+        self.set('MAX_URL',1024)
+        self.set('HTTP_VERSION', 1.0)
+        self.set('PUBLIC_DIR','www')
+        self.set('INDEX_FILES', ['index.html','index.htm'])
+        # NOTE: The following are currently unused
+        self.set('LOGGING', True)
+        self.set('LOG_FILE', 'server.log')
+
+    def file(self, file_path):
+        self.defaults()
+        if os.path.isfile(file_path):
+            # Python 3.^
+            if sys.version_info > (3, 0):
+                config = configparser.ConfigParser()
+                config.read(file_path)
+                if "server" in config:
+                    for key in config["server"]:
+                        try:
+                            value = config["server"][key]
+                            if key.upper() == "PORT" or key.upper() == "REQ_BUFFSIZE": value = int(value)
+                            elif key.upper() == "HTTP_VERSION": value = float(config["server"][key])
+                            elif key.upper() == "INDEX_FILES": value = config["server"][key].split()
+                            else: value = str(config["server"][key])
+                            self.set(key.upper(), value)
+                        except ValueError:
+                            raise
+                else:
+                    print("* Wrong or incorrect configuration")
+                    print("* Assuming default settings")
+            # Python 2.^
+            else:
+                with open(file_path,"rb") as f:
+                    config = ConfigParser.ConfigParser()
+                    config.readfp(f)
+                    try:
+                        for pair in config.items("server"):
+                            try:
+                                key, value = pair[0], pair[1]
+                                if key.upper() in ["PORT", "REQ_BUFFSIZE"]: value = int(value)
+                                elif key.upper() == "HTTP_VERSION": value = float(value)
+                                elif key.upper() == "INDEX_FILES": value = value.split()
+                                elif key.upper() == "LOGGING": value = bool(value)
+                                self.set(pair[0].upper(), value)
+                            except ValueError:
+                                raise
+                    except ConfigParser.NoSectionError:
+                        print("* Wrong or incorrect configuration")
+                        print("* Assuming default settings")
+
+        else:
+            # Should create a new config file
+            print("* Missing configuration file")
+            print("* Assuming default settings")
+
+def test():
+    c = Config()
+    c.file('config')
+    c.print()
+
+if __name__ == "__main__":
+    test()

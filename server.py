@@ -9,6 +9,9 @@ __version__ = "0.0.2"
 
 __all__ = [ "HttpHandler", "ForkingServer", "NonBlockingServer"]
 
+# Local module
+import config
+
 # gevent test
 from gevent.server import StreamServer
 
@@ -110,20 +113,22 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self,conn=None,server=None):
+    def __init__(self,conn=None,cfg=None):
         """conn stands for connection"""
         self.close = True
         self.finished = False
-        if server:
-            self.response_queue = queue.Queue()
-            self.server = server
-            # XXX: validate?
-            if self.server.HTTP_VERSION == 1.1: self.version = 'HTTP/1.1'
-            elif self.server.HTTP_VERSION == 1.0: self.version = 'HTTP/1.0'
-            self.__version = self.version
+        self.response_queue = queue.Queue()
         if conn:
             self.conn = conn
             self.addr = conn.getpeername()
+        if cfg:
+            self.cfg = cfg
+        else:
+            self.cfg = config.Config()
+            self.cfg.defaults()
+        if self.cfg.get('HTTP_VERSION') == 1.1: self.version = 'HTTP/1.1'
+        elif self.cfg.get('HTTP_VERSION') == 1.0: self.version = 'HTTP/1.0'
+        self.__version = self.version
         # Create current reques variables
         self.refresh()
         # Create input buffer
@@ -206,7 +211,7 @@ class HttpHandler():
         if __debug__: print("Receiving..")
         while True:
             try:
-                data = self.conn.recv(self.server.REQ_BUFFSIZE)
+                data = self.conn.recv(self.cfg.get('REQ_BUFFSIZE'))
                 if __debug__: print("Received data: \r\n{}".format(str(data)))
                 # NOTE: Handles telnet termination character
                 # XXX: Should probably have a mechanism inside this method  to 
@@ -218,7 +223,7 @@ class HttpHandler():
                 # NOTE:client closed connection
                     self.close = True
                     return False
-                if len(data) < self.server.REQ_BUFFSIZE: break
+                if len(data) < self.cfg.get('REQ_BUFFSIZE'): break
             # Break the loop if EWOULDBLOCK
             except (socket.error, IOError) as e:
                 if e.errno == errno.EINTR: continue # retry recv call
@@ -254,9 +259,7 @@ class HttpHandler():
             self.__status_line = self.__status_line.decode('utf-8')
             return True
         except ValueError:
-            # XXX: should be a different value i.e.: 
-            # MAXLENURL, LENURL, MAXURL, URILEN, MAXURILEN
-            if len(self.__input_buffer) > self.server.REQ_BUFFSIZE:
+            if len(self.__input_buffer) > self.cfg.get('MAX_URL'):
                 self.send_error(414)
                 self.refresh()
                 # NOTE: Reset input buffer
@@ -340,10 +343,10 @@ class HttpHandler():
         except:
             self.__query_string = ''
         path = path[0]
-        path = self.server.PUBLIC_DIR + path
+        path = self.cfg.get('PUBLIC_DIR') + path
         # CGI?
         # FIXME: Replace input with configurable i.e. CGIDIR, DIRCGI, CGIPATH
-        if path.startswith(self.server.PUBLIC_DIR + "/cgi-bin/"):
+        if path.startswith(self.cfg.get('PUBLIC_DIR') + "/cgi-bin/"):
             if os.path.isfile(path):
                 self.__filename = os.path.basename(path)
                 self.__cgi = True
@@ -351,7 +354,7 @@ class HttpHandler():
                 return True
         # Directory?
         if os.path.isdir(path):
-            for index in self.server.INDEX_FILES:
+            for index in self.cfg.get('INDEX_FILES'):
                 #index = os.path.join(path, index) #TOO SLOW
                 if path.endswith("/"): index = path + index
                 else: index = path + "/" + index
@@ -519,11 +522,11 @@ class HttpHandler():
     def queue_cgi(self, path = None):
         if not path: path = self.__path
         env = {}
-        env["SERVER_NAME"] = self.server.name
-        env["SERVER_SOFTWARE"] = self.server.version_string
+        env["SERVER_NAME"] = __servername__
+        env["SERVER_SOFTWARE"] = __version__
         env["GATEWAY_INTERFACE"] = "CGI/1.1"
         env["SERVER_PROTOCOL"] = self.version
-        env["SERVER_PORT"] = str(self.server.PORT)
+        env["SERVER_PORT"] = str(self.cfg.get('PORT'))
         env["REQUEST_METHOD"] = self.__method
         env["REMOTE_ADDR"] = str(self.addr[0])
         env["REMOTE_PORT"] = str(self.addr[1])
@@ -709,7 +712,7 @@ class ForkingServer(BaseServer):
                             self.conn.close()
                         else:
                             self.socket.close()
-                            self.handler = HttpHandler(self.conn,self)
+                            self.handler = HttpHandler(self.conn)
                             self.connected = True
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
@@ -761,7 +764,7 @@ class NonBlockingServer(BaseServer):
                         # Set to non-blocking
                         conn.setblocking(False)
                         self.inputs.append(conn)
-                        self.handlers[conn] = HttpHandler(conn,self)
+                        self.handlers[conn] = HttpHandler(conn)
                         count += 1
                     else:
                         #if s not in self.handlers:
@@ -807,23 +810,27 @@ class NonBlockingServer(BaseServer):
         if connection in self.handlers:
             del self.handlers[connection]
 
-class geventServer(StreamServer, BaseServer):
-        def __init__(self,listener, handle = None, spawn = 'default', config = 'config'):
-            super(BaseServer, self).__init__()
-            super(StreamServer, self).__init__(listener, handle, spawn)
+class AsyncServer(StreamServer):
+    def __init__(self):
+        pass
+    
+    def handle(self, socket, address):
+        handler = HttpHandler(socket)
+        while not handler.finished:
+            handler.handle()
+        handler.send()
+        del handler
 
-def handle(s,a):
-    print("New connection")
-    handler = HttpHandler(s, BaseServer())
-    print(handler)
-    while True:
-        print(s.recv(800))
+    # XXX: serve_persistent -> serve
+    def serve_persistent(self):
+        server = StreamServer(("localhost",8000), handle = self.handle)
+        server.serve_forever()
 
 def test():
     #server = ForkingServer()
-    #server = NonBlockingServer()
-    #server.serve_persistent()
-    g = StreamServer(("localhost",8010), handle = handle)
-    g.serve_forever()
+    server = NonBlockingServer()
+    #server = AsyncServer()
+    server.serve_persistent()
+
 if __name__ == "__main__":
     test()
