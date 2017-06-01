@@ -34,6 +34,7 @@ Example configuration file
 host = localhost
 port = 8000
 public_dir = www
+cgi_dir = www/cgi-bin
 req_buffsize = 4096
 index_files = index.html index.htm
 ````
@@ -43,8 +44,8 @@ index_files = index.html index.htm
 * ~~Handle zombie processes~~
 * ~~HTTP/1.1 and HTTP/0.9 support~~
 * ~~Basic CGI handling~~
-* [95%]Non-blocking IO (select)
-* Async (gevent or else)
+* ~~Non-blocking IO (select)~~
+* ~~Async (with gevent)~~
 * Support for multiple transfer encodings
 * Support for multiple charsets
 * Caching
