@@ -24,7 +24,7 @@ class Config(object):
     def get(self, key, default = None):
         return self._properties.get(key, default)
     
-    def print(self):
+    def print_config(self):
         """Prints property value pairs for each defined property"""
         for key in self._properties:
             print("{:<20} {}".format(key,self.get(key)))
@@ -90,7 +90,7 @@ class Config(object):
 def test():
     c = Config()
     c.file('config')
-    c.print()
+    c.print_config()
 
 if __name__ == "__main__":
     test()

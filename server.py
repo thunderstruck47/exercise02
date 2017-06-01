@@ -81,6 +81,7 @@ class HttpHandler():
         self.__path = ''
         self.__version = ''
         self.__content_length = ''
+        self.__content_type = ''
         self.__cgi = False
         self.__stage = self.STAGE1
     
@@ -126,6 +127,7 @@ class HttpHandler():
         else:
             self.cfg = config.Config()
             self.cfg.defaults()
+            self.cfg.set('REQ_BUFFSIZE',65000)
         if self.cfg.get('HTTP_VERSION') == 1.1: self.version = 'HTTP/1.1'
         elif self.cfg.get('HTTP_VERSION') == 1.0: self.version = 'HTTP/1.0'
         self.__version = self.version
@@ -149,12 +151,12 @@ class HttpHandler():
         # Check stage
         if self.__stage == self.STAGE1:
             self.finished = False
-            if __debug__: print("-----STAGE 1-----")
+            #if __debug__: print("-----STAGE 1-----")
             if self.status_line_recieved():
-                if __debug__: print("Status line received:\r\n" \
-                        + self.__status_line)
+                #if __debug__: print("Status line received:\r\n" \
+                #        + self.__status_line)
                 if self.status_line_parse():
-                    if __debug__: print("Status line parsed")
+                    #if __debug__: print("Status line parsed")
                     if self.__version == 'HTTP/0.9':
                         self.queue_file()
                         self.finish() #Should be moved to queue_file and send_error (calle it queue_error)
@@ -164,9 +166,9 @@ class HttpHandler():
                     self.finish()
                 #error was sent
         if self.__stage == self.STAGE2:
-            if __debug__: print("-----STAGE 2-----")
+            #if __debug__: print("-----STAGE 2-----")
             if self.headers_recieved():
-                if __debug__: print("Headers received:\r\n" + str(self.__headers))
+                #if __debug__: print("Headers received:\r\n" + str(self.__headers))
                 if self.headers_parse():
                     if self.__cgi:
                         if self.__method == 'POST' and self.__content_length != '' and self.__content_length != '0':
@@ -174,19 +176,19 @@ class HttpHandler():
                         else:
                             self.queue_cgi()
                     else:
-                        if __debug__: print("Headers parsed")
+                        #if __debug__: print("Headers parsed")
                         self.queue_file()
-                        if __debug__: 
-                            print("Queued files:" + str(self.response_queue.qsize())) 
-                            print("Close:" + str(self.close))
-                            print("Finished:" + str(self.finished))
+                        #if __debug__: 
+                        #    print("Queued files:" + str(self.response_queue.qsize())) 
+                        #    print("Close:" + str(self.close))
+                        #    print("Finished:" + str(self.finished))
                         self.finish()
                 else:
                     self.finish()
         if self.__stage == self.STAGE3:
-            if __debug__: print("------STAGE 3------")
+            #if __debug__: print("------STAGE 3------")
             if self.body_received():
-                if __debug__: print("Body received:\r\n" + str(self.__body))
+                #if __debug__: print("Body received:\r\n" + str(self.__body))
                 self.queue_cgi()
             else:
                 self.finish()
@@ -204,15 +206,15 @@ class HttpHandler():
         except ValueError:
             return False
 
-
+    #@profile
     def recv(self):
         """returns void"""
         # Read until the socket blocks
-        if __debug__: print("Receiving..")
+        #if __debug__: print("Receiving..")
         while True:
             try:
                 data = self.conn.recv(self.cfg.get('REQ_BUFFSIZE'))
-                if __debug__: print("Received data: \r\n{}".format(str(data)))
+                #if __debug__: print("Received data: \r\n{}".format(str(data)))
                 # NOTE: Handles telnet termination character
                 # XXX: Should probably have a mechanism inside this method  to 
                 # detect invalid queries if \r\n was not reached 
@@ -237,7 +239,7 @@ class HttpHandler():
         try:
             next_response = self.response_queue.get_nowait()
         except (queue.Empty):
-            if __debug__: print("Queue is empty")
+            #if __debug__: print("Queue is empty")
             return False
         else:
             # XXX: Needs error handling
@@ -266,7 +268,7 @@ class HttpHandler():
                 self.reset_buffer()
             return False
     
-    #@profile
+    #n@profile
     def status_line_parse(self):
         """returns True if request is valid"""
         status_line = self.__status_line.strip()
@@ -292,7 +294,7 @@ class HttpHandler():
         self.close = True
         return False
     
-    #@profile
+    #nn@profile
     def validate_version(self,version = None):
         # NOTE: Useful for unit testing later on
         if not version: version = self.__version
@@ -319,6 +321,7 @@ class HttpHandler():
         if version == "HTTP/1.1": # Change default close
             self.close = False
         return True
+   
     #@profile
     def validate_method(self,method = None):
         if not method: method = self.__method
@@ -326,6 +329,7 @@ class HttpHandler():
             self.send_error(501)
             return False
         return True
+
     #@profile
     def validate_path(self,path = None):
         if not path: path = self.__path
@@ -438,6 +442,7 @@ class HttpHandler():
         self.response_queue.put(self.__response)
         self.refresh()
         self.finish()
+    
     #@profile
     def queue_file(self):
         """adds a file to response queue"""
@@ -456,7 +461,7 @@ class HttpHandler():
         # XXX: OSError, etc.?
         except IOError as e:
             self.send_error(500)
-
+    
     def add_response(self, code, message = None):
         """writes response status code and default headers"""
         # Validate code
@@ -514,11 +519,6 @@ class HttpHandler():
             dt.year, dt.hour, dt.minute, dt.second)
 
     
-    # TODO: ------------------ NEEDS WORK BElOW -------------------------------
-    # _________________________________________________________________________
-    # _________________________________________________________________________
-    # _________________________________________________________________________
-    # _________________________________________________________________________
     def queue_cgi(self, path = None):
         if not path: path = self.__path
         env = {}
@@ -534,7 +534,7 @@ class HttpHandler():
         env["PATH_INFO"] = path
         env["SCRIPT_NAME"] = self.__filename
         env["CONTENT_LENGTH"] = str(self.__content_length)
-        #env["CONTENT_TYPE"] = self.__content_type
+        env["CONTENT_TYPE"] = self.__content_type
 
         try:
             process = subprocess.Popen(["./" + path], stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, env = env)
@@ -812,24 +812,35 @@ class NonBlockingServer(BaseServer):
 
 class AsyncServer(StreamServer):
     def __init__(self):
-        pass
-    
+        self.count_opened = 0
+        self.count_closed = 0
+        self.count_requests = 0
+   
+    #@profile
     def handle(self, socket, address):
+        self.count_opened += 1
         handler = HttpHandler(socket)
-        while not handler.finished:
+        while True:
             handler.handle()
-        handler.send()
-        del handler
+            handler.send()
+            if handler.finished:
+                self.count_requests += 1
+                if handler.close:
+                    self.count_closed += 1
+                    break
 
-    # XXX: serve_persistent -> serve
     def serve_persistent(self):
-        server = StreamServer(("localhost",8000), handle = self.handle)
-        server.serve_forever()
-
+        server = StreamServer(("",8000), handle = self.handle)
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            print("Total opened: {}".format(self.count_opened))
+            print("Total closed: {}".format(self.count_closed))
+            print("Total requests: {}".format(self.count_requests))
 def test():
     #server = ForkingServer()
-    server = NonBlockingServer()
-    #server = AsyncServer()
+    #server = NonBlockingServer()
+    server = AsyncServer()
     server.serve_persistent()
 
 if __name__ == "__main__":
