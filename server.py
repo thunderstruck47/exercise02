@@ -441,8 +441,7 @@ class HttpHandler():
         # Check if connection header was set
         #print(connection)
         if len(connection) > 0:
-            if connection == 'close': self.close = True
-            else: self.close = False
+            self.close = True if connection == 'close' else False
         else:
             if self._version == 'HTTP/0.9' or self._version == 'HTTP/1.0':
                 self.close = True
@@ -696,6 +695,12 @@ class BaseServer(object):
         conn.close()
 
 class ForkingServer(BaseServer):
+    def __init__(self, config='config'):
+        BaseServer.__init__(config)
+        self.conn = None
+        self.addr = None
+        self.connected = False
+
     def serve_persistent(self):
         self.conn = None
         self.connected = False
@@ -716,7 +721,7 @@ class ForkingServer(BaseServer):
                     try:
                         pair = self.socket.accept()
                     except IOError as e:
-                        code, msg = e.args
+                        code, _ = e.args
                         if code == errno.EINTR:
                             continue
                         else:
@@ -752,7 +757,7 @@ class ForkingServer(BaseServer):
 class NonBlockingServer(BaseServer):
     def __init__(self, config="config"):
         # Initializing base server config
-        super(self.__class__, self).__init__(config)
+        super(BaseServer, self).__init__(config)
 
         # Set socket to non-blocking
         self.socket.setblocking(0)
@@ -785,7 +790,7 @@ class NonBlockingServer(BaseServer):
                         # Set to non-blocking
                         conn.setblocking(False)
                         self.inputs.append(conn)
-                        self.handlers[conn] = HttpHandler(conn)
+                        self.handlers[conn] = HttpHandler(conn, addr)
                         count += 1
                     else:
                         #if s not in self.handlers:
