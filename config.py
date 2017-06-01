@@ -21,7 +21,7 @@ class Config(object):
     def set(self, key, value):
         self._properties[key] = value
     
-    def get(self, key, default = None):
+    def get(self, key, default=None):
         return self._properties.get(key, default)
     
     def print_config(self):
@@ -30,13 +30,14 @@ class Config(object):
             print("{:<20} {}".format(key,self.get(key)))
 
     def defaults(self):
-        self.set('HOST','')
-        self.set('PORT',8000)
-        self.set('REQ_BUFFSIZE',4096)
-        self.set('MAX_URL',1024)
+        self.set('HOST', '')
+        self.set('PORT', 8000)
+        self.set('REQ_BUFFSIZE', 4096)
+        self.set('MAX_URL', 1024)
         self.set('HTTP_VERSION', 1.0)
-        self.set('PUBLIC_DIR','www')
-        self.set('INDEX_FILES', ['index.html','index.htm'])
+        self.set('PUBLIC_DIR', 'www')
+        self.set('CGI_DIR', 'www/cgi-bin')
+        self.set('INDEX_FILES', ['index.html', 'index.htm'])
         # NOTE: The following are currently unused
         self.set('LOGGING', True)
         self.set('LOG_FILE', 'server.log')

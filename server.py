@@ -372,7 +372,7 @@ class HttpHandler():
         path = self.cfg.get('PUBLIC_DIR') + path
         # CGI?
         # FIXME: Replace input with configurable i.e. CGIDIR, DIRCGI, CGIPATH
-        if path.startswith(self.cfg.get('PUBLIC_DIR') + "/cgi-bin/"):
+        if path.startswith(self.cfg.get('CGI_DIR') + "/"):
             if self._version == 'HTTP/0.9':
                 self.send_error(403)
                 return False
@@ -606,7 +606,7 @@ class HttpHandler():
 
 class BaseServer(object):
 
-    def __init__(self, config_filename="config"):
+    def __init__(self, config_filename="server.conf"):
 
         # Reading settings from config file
         # CAUTION path/filename?
@@ -698,7 +698,7 @@ class BaseServer(object):
         conn.close()
 
 class ForkingServer(BaseServer):
-    def __init__(self, config='config'):
+    def __init__(self, config='server.conf'):
         BaseServer.__init__(config)
         self.conn = None
         self.addr = None
@@ -758,7 +758,7 @@ class ForkingServer(BaseServer):
 
 
 class NonBlockingServer(BaseServer):
-    def __init__(self, config="config"):
+    def __init__(self, config="server.conf"):
         # Initializing base server config
         super(BaseServer, self).__init__(config)
 
