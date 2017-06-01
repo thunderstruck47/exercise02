@@ -114,20 +114,24 @@ class HttpHandler():
         '.h': 'text/plain',
         })
 
-    def __init__(self,conn=None,cfg=None):
+    def __init__(self,conn=None,addr=None,server=None,cfg=None):
         """conn stands for connection"""
         self.close = True
         self.finished = False
         self.response_queue = queue.Queue()
         if conn:
             self.conn = conn
-            self.addr = conn.getpeername()
+            if addr:
+                self.addr = addr
+            else:
+                self.addr = conn.getpeername()
+        if server:
+            self.server = server
         if cfg:
             self.cfg = cfg
         else:
             self.cfg = config.Config()
             self.cfg.defaults()
-            self.cfg.set('REQ_BUFFSIZE',65000)
         if self.cfg.get('HTTP_VERSION') == 1.1: self.version = 'HTTP/1.1'
         elif self.cfg.get('HTTP_VERSION') == 1.0: self.version = 'HTTP/1.0'
         self.__version = self.version
@@ -139,6 +143,16 @@ class HttpHandler():
     def finish(self):
         self.finished = True
         self.__stage = self.STAGE1
+    
+    def handle_loop(self):
+        while True:
+            if not self.handle(): return
+            if self.finished:
+                self.server.count_requests+=1
+                self.send()
+                if self.close:
+                    self.conn.close()
+                    return
 
     #@profile
     def handle(self):
@@ -147,7 +161,7 @@ class HttpHandler():
         if not self.recv():
             self.close = True
             self.finish()
-            return
+            return False
         # Check stage
         if self.__stage == self.STAGE1:
             self.finished = False
@@ -192,6 +206,7 @@ class HttpHandler():
                 self.queue_cgi()
             else:
                 self.finish()
+        return True
 
     def body_received(self):
         try:
@@ -712,7 +727,7 @@ class ForkingServer(BaseServer):
                             self.conn.close()
                         else:
                             self.socket.close()
-                            self.handler = HttpHandler(self.conn)
+                            self.handler = HttpHandler(self.conn, self.addr)
                             self.connected = True
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
@@ -811,32 +826,30 @@ class NonBlockingServer(BaseServer):
             del self.handlers[connection]
 
 class AsyncServer(StreamServer):
-    def __init__(self):
+    def __init__(self, listener = None, **ssl_args):
+        if not listener: listener = ("",8000)
+        StreamServer.__init__(self, listener, **ssl_args)
+        self.max_accept = 1000
         self.count_opened = 0
         self.count_closed = 0
         self.count_requests = 0
+        self.handler = HttpHandler
    
     #@profile
     def handle(self, socket, address):
         self.count_opened += 1
-        handler = HttpHandler(socket)
-        while True:
-            handler.handle()
-            handler.send()
-            if handler.finished:
-                self.count_requests += 1
-                if handler.close:
-                    self.count_closed += 1
-                    break
+        handler = self.handler(socket, address, self)
+        handler.handle_loop()
+        self.count_closed += 1
 
     def serve_persistent(self):
-        server = StreamServer(("",8000), handle = self.handle)
         try:
-            server.serve_forever()
+            self.serve_forever()
         except KeyboardInterrupt:
             print("Total opened: {}".format(self.count_opened))
             print("Total closed: {}".format(self.count_closed))
             print("Total requests: {}".format(self.count_requests))
+
 def test():
     #server = ForkingServer()
     #server = NonBlockingServer()
