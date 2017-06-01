@@ -19,11 +19,11 @@ python server.py
 
 * Speaks (partially) HTTP/0.9, HTTP/1.0 and HTTP/1.1
 * Supports GET, HEAD and POST methods
-* Basic server configuration via file
+* Basic server configuration via config file (server.conf by default)
 * Handles persistent, non persistent and single connections
-* Handles concurrency via forking
-* Serves static files
-* Basic CGI handling ("www/cgi-bin" folder)
+* Handles concurrency via forking, non-blocking IO and asynchronously
+* Serves static files of various MIME types
+* Basic CGI script handling (scripts must set their "content-length")
 
 ### Configuration
 
