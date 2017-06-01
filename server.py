@@ -373,6 +373,9 @@ class HttpHandler():
         # CGI?
         # FIXME: Replace input with configurable i.e. CGIDIR, DIRCGI, CGIPATH
         if path.startswith(self.cfg.get('PUBLIC_DIR') + "/cgi-bin/"):
+            if self._version == 'HTTP/0.9':
+                self.send_error(403)
+                return False
             if os.path.isfile(path):
                 self._filename = os.path.basename(path)
                 self._cgi = True
