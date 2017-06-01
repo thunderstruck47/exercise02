@@ -2,6 +2,9 @@
 *~
 *.swp
 *.lprof
+*.prof
+*.pyo
+*.pyc
 www/cs.html
 www/sari.html
 www/upload.html
