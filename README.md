@@ -23,7 +23,7 @@ python server.py
 * Handles persistent, non persistent and single connections
 * Handles concurrency via forking, non-blocking IO and asynchronously
 * Serves static files of various MIME types
-* Basic CGI script handling (scripts must set their "content-length")
+* Basic CGI script handling (scripts must set "content-length" and "content-type")
 
 ### Configuration
 
