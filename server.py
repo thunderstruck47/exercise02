@@ -292,7 +292,7 @@ class HttpHandler():
             self._status_line, self._input_buffer = \
                     self._input_buffer.split(self._lt.encode('utf-8'), 1)
             self._status_line = self._status_line.decode('utf-8')
-            self.server.stats.inc_received(self.addr)
+            self.server.stats.add_received(self.addr)
             return True
         except ValueError:
             if len(self._input_buffer) > self.cfg.get('MAX_URL'):
@@ -469,7 +469,7 @@ class HttpHandler():
             self.add_header('Content-Length', '0')
         self.add_end_header()
         self.queue_response()
-        self.server.stats.inc_error(self.addr)
+        self.server.stats.add_error(self.addr)
         # TODO: Add message boyd
 
     def queue_response(self):
@@ -494,7 +494,7 @@ class HttpHandler():
                 if self._method != 'HEAD': self._response += f.read()
                 self.queue_response()
                 # NOTE: stats
-                self.server.stats.inc_success(self.addr)
+                self.server.stats.add_success(self.addr)
         # XXX: OSError, etc.?
         except IOError as e:
             self.send_error(500)
@@ -588,7 +588,7 @@ class HttpHandler():
             self.add_response(200)
             self._response += output
             self.queue_response()
-            self.server.stats.inc_success(self.addr)
+            self.server.stats.add_success(self.addr)
         except Exception:
             raise
             self.send_error(500)
@@ -627,7 +627,7 @@ class BaseServer(object):
         # Setting up the HTTP handler
         self.handler = HttpHandler
         # Setting up the statistics object
-        self.stats = stats.Stats()
+        self.stats = stats.RedisStats()
         # Set up a socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -718,6 +718,7 @@ class ForkingServer(BaseServer):
         self.conn = None
         self.addr = None
         self.connected = False
+        self.stats = stats.RedisStats()
 
     def serve_persistent(self):
         self.conn = None
@@ -732,7 +733,7 @@ class ForkingServer(BaseServer):
                     self.handler.send()
                     if self.handler.close:
                         self.conn.close()
-                        #self.stats.close(self.handler.addr)
+                        self.stats.close(self.handler.addr)
                         self.connected = False
                         del self.handler
                         os._exit(0)
@@ -758,11 +759,12 @@ class ForkingServer(BaseServer):
                         else:
                             self.socket.close()
                             self.handler = HttpHandler(self.conn, self.addr, self)
-                            #self.stats.add_handler(self.addr)
+                            self.stats.add_handler(self.addr)
                             self.connected = True
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
             self.socket.close()
+            self.stats.print_stats()
             # TODO: Needs error handling
             #print("Total {}".format(str(self.stats.get_total())))
             #print("Times standard deviation: {}".format(self.stats.get_time_sd()))
@@ -856,7 +858,7 @@ class AsyncServer(StreamServer):
         StreamServer.__init__(self, listener, **ssl_args)
         self.max_accept = 1000  
         self.handler = HttpHandler
-        self.stats = stats.Stats()
+        self.stats = stats.RedisStats()
 
     #@profile
     def handle(self, socket, address):
@@ -873,9 +875,9 @@ class AsyncServer(StreamServer):
             self.stats.print_stats()
 
 def test():
-    #server = ForkingServer()
+    server = ForkingServer()
     #server = NonBlockingServer()
-    server = AsyncServer()
+    #server = AsyncServer()
     server.serve_persistent()
 
 if __name__ == "__main__":
