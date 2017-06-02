@@ -12,7 +12,7 @@ try:
 except ModuleNotFoundError:
     pass
 
-class Stats(object):
+class Store(object):
     def __init__(self):
         self._statistics = {}
     
@@ -208,7 +208,7 @@ Timestamp should be in UTC"""
     def print_stats(self):
         self.r.publish(CHANNEL, 'print_stats()')
 
-class RedisStats(RedisMixIn, Stats): pass
+class RedisStore(RedisMixIn, Store): pass
 
 def test():
     s = Stats()

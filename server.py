@@ -627,7 +627,7 @@ class BaseServer(object):
         # Setting up the HTTP handler
         self.handler = HttpHandler
         # Setting up the statistics object
-        self.stats = stats.RedisStats()
+        self.stats = stats.RedisStore()
         # Set up a socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -718,7 +718,7 @@ class ForkingServer(BaseServer):
         self.conn = None
         self.addr = None
         self.connected = False
-        self.stats = stats.RedisStats()
+        self.stats = stats.RedisStore()
 
     def serve_persistent(self):
         self.conn = None
@@ -858,7 +858,7 @@ class AsyncServer(StreamServer):
         StreamServer.__init__(self, listener, **ssl_args)
         self.max_accept = 1000  
         self.handler = HttpHandler
-        self.stats = stats.RedisStats()
+        self.stats = stats.RedisStore()
 
     #@profile
     def handle(self, socket, address):
