@@ -46,6 +46,10 @@ index_files = index.html index.htm
 * ~~Basic CGI handling~~
 * ~~Non-blocking IO (select)~~
 * ~~Async (with gevent)~~
+* Statistics collector
+* Monitoring shell
+
+# Optional
 * Support for multiple transfer encodings
 * Support for multiple charsets
 * Caching
