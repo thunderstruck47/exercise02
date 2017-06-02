@@ -23,6 +23,7 @@ import io
 import select
 from gevent.server import StreamServer
 import config
+import stats
 
 # Import correct config parser and queue
 if sys.version_info > (3, 0):
@@ -104,6 +105,7 @@ class HttpHandler():
 
     def __init__(self, conn=None, addr=None, server=None, cfg=None):
         """conn stands for connection"""
+        self.total_responses = 0
         self._input_buffer = b''
         self._status_line = ''
         self._headers = []
@@ -143,15 +145,16 @@ class HttpHandler():
     def finish(self):
         self.finished = True
         self._stage = self.STAGE1
+        #self.total_responses += 1
 
     def handle_loop(self):
         while True:
             if not self.handle(): return
             if self.finished:
-                self.server.count_requests += 1
+                #self.server.stats
+                #self.server.count_requests += 1
                 self.send()
                 if self.close:
-                    self.conn.close()
                     return
 
     #@profile
@@ -161,6 +164,9 @@ class HttpHandler():
         if not self.recv():
             self.close = True
             self.finish()
+            # XXX: this closes the connection and does not produce a response
+            # There should be a better way to account for this
+            #self.total_responses -= 1
             return False
         # Check stage
         if self._stage == self.STAGE1:
@@ -281,6 +287,7 @@ class HttpHandler():
             self._status_line, self._input_buffer = \
                     self._input_buffer.split(self._lt.encode('utf-8'), 1)
             self._status_line = self._status_line.decode('utf-8')
+            self.server.stats.inc_received(self.addr)
             return True
         except ValueError:
             if len(self._input_buffer) > self.cfg.get('MAX_URL'):
@@ -460,6 +467,7 @@ class HttpHandler():
             self.add_header('Content-Length', '0')
         self.add_end_header()
         self.queue_response()
+        self.server.stats.inc_error(self.addr)
         # TODO: Add message boyd
 
     def queue_response(self):
@@ -483,6 +491,8 @@ class HttpHandler():
                 self.add_end_header()
                 if self._method != 'HEAD': self._response += f.read()
                 self.queue_response()
+                # NOTE: stats
+                self.server.stats.inc_success(self.addr)
         # XXX: OSError, etc.?
         except IOError as e:
             self.send_error(500)
@@ -576,6 +586,7 @@ class HttpHandler():
             self.add_response(200)
             self._response += output
             self.queue_response()
+            self.server.stats.inc_success(self.addr)
         except Exception:
             raise
             self.send_error(500)
@@ -843,25 +854,32 @@ class AsyncServer(StreamServer):
         if not listener: listener = ("", 8000)
         StreamServer.__init__(self, listener, **ssl_args)
         self.max_accept = 1000
-        self.count_opened = 0
-        self.count_closed = 0
-        self.count_requests = 0
+        #self.count_opened = 0
+        #self.count_closed = 0
+        #self.count_requests = 0
         self.handler = HttpHandler
+        self.stats = stats.Stats()
 
     #@profile
     def handle(self, socket, address):
-        self.count_opened += 1
+        #self.count_opened += 1
+        self.stats.add_handler(address)
         handler = self.handler(socket, address, self)
         handler.handle_loop()
-        self.count_closed += 1
+        self.stats.close(address)
+        socket.close()
+        #print("Handler {} : {}".format(address, self.stats.get_handler()))
+        #self.count_closed += 1
+        #print("{} sent {} responses".format(address, handler.total_responses))
 
     def serve_persistent(self):
         try:
             self.serve_forever()
         except KeyboardInterrupt:
-            print("Total opened: {}".format(self.count_opened))
-            print("Total closed: {}".format(self.count_closed))
-            print("Total requests: {}".format(self.count_requests))
+            print("Total {}".format(str(self.stats.get_total())))
+            #print("Total opened: {}".format(self.count_opened))
+            #print("Total closed: {}".format(self.count_closed))
+            #print("Total requests: {}".format(self.count_requests))
 
 def test():
     #server = ForkingServer()
