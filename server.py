@@ -21,6 +21,7 @@ import datetime
 import io
 # Non-blocking IO
 import select
+import time
 from gevent.server import StreamServer
 import config
 import stats
@@ -148,13 +149,17 @@ class HttpHandler():
         #self.total_responses += 1
 
     def handle_loop(self):
+        self.server.stats.add_handler(self.addr, time.time())
         while True:
-            if not self.handle(): return
+            if not self.handle(): 
+                self.server.stats.close(self.addr, time.time())
+                return
             if self.finished:
                 #self.server.stats
                 #self.server.count_requests += 1
                 self.send()
                 if self.close:
+                    self.server.stats.close(self.addr)
                     return
 
     #@profile
@@ -316,11 +321,8 @@ class HttpHandler():
                     return True
             self.send_error(400)
         # Bad request
-        else:
-            # Reset protocol version
-            self.send_error(400)
-        # Request is invalid
         self.close = True
+        self.send_error(400)
         return False
 
     #nn@profile
@@ -624,6 +626,8 @@ class BaseServer(object):
         self.configure(config_filename)
         # Setting up the HTTP handler
         self.handler = HttpHandler
+        # Setting up the statistics object
+        self.stats = stats.Stats()
         # Set up a socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -710,7 +714,7 @@ class BaseServer(object):
 
 class ForkingServer(BaseServer):
     def __init__(self, config='server.conf'):
-        BaseServer.__init__(config)
+        super(self.__class__, self).__init__(config)
         self.conn = None
         self.addr = None
         self.connected = False
@@ -728,6 +732,7 @@ class ForkingServer(BaseServer):
                     self.handler.send()
                     if self.handler.close:
                         self.conn.close()
+                        #self.stats.close(self.handler.addr)
                         self.connected = False
                         del self.handler
                         os._exit(0)
@@ -752,11 +757,15 @@ class ForkingServer(BaseServer):
                             self.conn.close()
                         else:
                             self.socket.close()
-                            self.handler = HttpHandler(self.conn, self.addr)
+                            self.handler = HttpHandler(self.conn, self.addr, self)
+                            #self.stats.add_handler(self.addr)
                             self.connected = True
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
             self.socket.close()
+            # TODO: Needs error handling
+            #print("Total {}".format(str(self.stats.get_total())))
+            #print("Times standard deviation: {}".format(self.stats.get_time_sd()))
 
     def signal_handler(self, signum, frame):
         while True:
@@ -771,7 +780,7 @@ class ForkingServer(BaseServer):
 class NonBlockingServer(BaseServer):
     def __init__(self, config="server.conf"):
         # Initializing base server config
-        super(BaseServer, self).__init__(config)
+        super(self.__class__, self).__init__(config)
 
         # Set socket to non-blocking
         self.socket.setblocking(0)
@@ -788,14 +797,10 @@ class NonBlockingServer(BaseServer):
     def serve_persistent(self):
         print("* Serving HTTP at port {0} (Press CTRL+C to quit)".format(self.PORT))
         try:
-            count = 0
-            completed = 0
             while self.inputs:
                 # Wait for at least one socket to be ready for processing
                 # Needs error handling (Keyboard Interrupt)
                 r, w, e = select.select(self.inputs, self.outputs, self.inputs, 0.5)
-                #print("r: " + str(r))
-                #print("w: " + str(w))
                 # Handle inputs
                 for s in r:
                     if s is self.socket:
@@ -804,11 +809,9 @@ class NonBlockingServer(BaseServer):
                         # Set to non-blocking
                         conn.setblocking(False)
                         self.inputs.append(conn)
-                        self.handlers[conn] = HttpHandler(conn, addr)
-                        count += 1
+                        self.handlers[conn] = HttpHandler(conn, addr, self)
+                        self.stats.add_handler(addr, time.time())
                     else:
-                        #if s not in self.handlers:
-                        #    self.handlers[s] = HttpHandler(s,self)
                         handler = self.handlers[s]
                         handler.handle()
                         if handler.finished:
@@ -817,6 +820,7 @@ class NonBlockingServer(BaseServer):
                             if handler.response_queue.qsize() == 0 and \
                                     handler.close:
                                 self.clear(s)
+                                self.stats.close(handler.addr, time.time())
                                 if s in w: w.remove(s)
                 # Handle outputs
                 for s in w:
@@ -825,16 +829,13 @@ class NonBlockingServer(BaseServer):
                         # XXX: ?
                         self.outputs.remove(s)
                         if handler.finished and handler.close:
-                            completed += 1
+                            self.stats.close(handler.addr, time.time())
                             self.clear(s)
                 # Handle "exceptional conditions"
                 for s in e:
                     self.clear(s)
-                #print (self.handlers)
-            print(count)
         except KeyboardInterrupt:
-            print(count)
-            print(completed)
+            self.stats.print_stats()
             self.clear(self.socket)
 
     def clear(self, connection):
@@ -853,33 +854,23 @@ class AsyncServer(StreamServer):
     def __init__(self, listener=None, **ssl_args):
         if not listener: listener = ("", 8000)
         StreamServer.__init__(self, listener, **ssl_args)
-        self.max_accept = 1000
-        #self.count_opened = 0
-        #self.count_closed = 0
-        #self.count_requests = 0
+        self.max_accept = 1000  
         self.handler = HttpHandler
         self.stats = stats.Stats()
 
     #@profile
     def handle(self, socket, address):
-        #self.count_opened += 1
-        self.stats.add_handler(address)
+        #self.stats.add_handler(address)
         handler = self.handler(socket, address, self)
         handler.handle_loop()
-        self.stats.close(address)
+        #self.stats.close(address)
         socket.close()
-        #print("Handler {} : {}".format(address, self.stats.get_handler()))
-        #self.count_closed += 1
-        #print("{} sent {} responses".format(address, handler.total_responses))
-
+        
     def serve_persistent(self):
         try:
             self.serve_forever()
         except KeyboardInterrupt:
-            print("Total {}".format(str(self.stats.get_total())))
-            #print("Total opened: {}".format(self.count_opened))
-            #print("Total closed: {}".format(self.count_closed))
-            #print("Total requests: {}".format(self.count_requests))
+            self.stats.print_stats()
 
 def test():
     #server = ForkingServer()
