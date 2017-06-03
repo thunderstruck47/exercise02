@@ -2,6 +2,7 @@
 Currently contains only Stats interface
 """
 from redis import Redis
+from redis.exceptions import ConnectionError
 import time
 
 __all__ = ['Stats']
@@ -9,6 +10,12 @@ __all__ = ['Stats']
 class Stats(object):
     """Stats interface"""
     r = Redis()
+    # XXX: Trying out the connection. A better way must be implemented to handle
+    # the redis server
+    try:
+        r.ping()
+    except ConnectionError:
+        print("Warning: Could not connect to redis server! Run setup() to configure")
     # Default channel:
     _c = 'statistics'
 
@@ -43,7 +50,10 @@ class Stats(object):
     def _publish(self, addr, op, value):
         """Helper method to prepare and publish the message"""
         msg = "{} {} {}".format(str(addr), op, value)
-        self.r.publish(self._c, msg)
+        try:
+            self.r.publish(self._c, msg)
+        except ConnectionError as err:
+            print("Connection Error: Could not publish message")
 
     @classmethod
     def set_channel(self, channel):
