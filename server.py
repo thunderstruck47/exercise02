@@ -60,7 +60,7 @@ class HttpHandler():
         """init and reset socket data buffer"""
         self._input_buffer = b''
 
-   # Current request variables. When done, should be cleared with refresh()
+    # Current request variables. When done, should be cleared with refresh()
     def refresh(self):
         """init and reset current request variables"""
         self._status_line = ''
@@ -93,6 +93,19 @@ class HttpHandler():
 
     # CRLF
     _lt = '\r\n'
+    
+    # Error template
+    ERROR_TEMPLATE = """<html>
+  <head>
+    <title>{error}</title>
+  </head>
+  <body bgcolor="white">
+    <h1>{error}</h1>
+    <hr>
+    {server}
+  </body>
+</html>
+"""
 
     # Populate MIME types dictionary
     if not mimetypes.inited: mimetypes.init() # try to read system mime.types
@@ -462,12 +475,23 @@ class HttpHandler():
 
     def send_error(self, code):
         """adds error to response queue"""
-        self.add_response(code)
+        try:
+            msg = self._responses[code]
+        except KeyError:
+            msg = ''
+        error = '{code} {msg}'.format(code=code, msg=msg)
+        content = self.ERROR_TEMPLATE
+        content = content.format(error=error, server=self.server_string())
+        content = content.encode('UTF-8','replace')
+        c_size = len(content)
+        self.add_response(code, msg)
         if self._version != 'HTTP/0.9':
             if self.close: self.add_header('Connection', 'close')
             else: self.add_header('Connection', 'keep-alive')
-            self.add_header('Content-Length', '0')
+            self.add_header('Content-Type', 'text-html')
+            self.add_header('Content-Length', str(c_size))
         self.add_end_header()
+        self._response += content
         self.queue_response()
         self.server.stats.add_error(self.addr)
         # TODO: Add message boyd
@@ -627,7 +651,7 @@ class BaseServer(object):
         # Setting up the HTTP handler
         self.handler = HttpHandler
         # Setting up the statistics object
-        self.stats = stats.RedisStore()
+        self.stats = stats.Store()
         # Set up a socket
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -718,7 +742,7 @@ class ForkingServer(BaseServer):
         self.conn = None
         self.addr = None
         self.connected = False
-        self.stats = stats.RedisStore()
+        self.stats = stats.Store()
 
     def serve_persistent(self):
         self.conn = None
@@ -858,7 +882,7 @@ class AsyncServer(StreamServer):
         StreamServer.__init__(self, listener, **ssl_args)
         self.max_accept = 1000  
         self.handler = HttpHandler
-        self.stats = stats.RedisStore()
+        self.stats = stats.Store()
 
     #@profile
     def handle(self, socket, address):
