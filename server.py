@@ -880,8 +880,11 @@ class NonBlockingServer(BaseServer):
             del self.handlers[connection]
 
 class AsyncServer(StreamServer):
-    def __init__(self, listener=None, **ssl_args):
+    def __init__(self, cfg=None, listener=None, **ssl_args):
         if not listener: listener = ("", 8000)
+        self.cfg = config.Config()
+        self.cfg.defaults()
+        if cfg: self.cfg.file(cfg)
         StreamServer.__init__(self, listener, **ssl_args)
         self.max_accept = 1000  
         self.handler = HttpHandler
@@ -890,7 +893,7 @@ class AsyncServer(StreamServer):
     #@profile
     def handle(self, socket, address):
         #self.stats.add_handler(address)
-        handler = self.handler(socket, address, self)
+        handler = self.handler(socket, address, self, self.cfg)
         handler.handle_loop()
         #self.stats.close(address)
         socket.close()
@@ -904,7 +907,7 @@ class AsyncServer(StreamServer):
 def test():
     #server = ForkingServer()
     #server = NonBlockingServer()
-    server = AsyncServer()
+    server = AsyncServer('server.conf')
     server.serve_persistent()
 
 if __name__ == "__main__":

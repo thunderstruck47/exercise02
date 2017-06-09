@@ -69,6 +69,9 @@ class Config(object):
                                 value = float(config["server"][key])
                             elif key.upper() == "INDEX_FILES":
                                 value = config["server"][key].split()
+                            elif key.upper() == "PUBLIC_DIR" or \
+                                    key.upper() == "CGI_DIR":
+                                value = self._abs_dir(value)
                             else:
                                 value = str(config["server"][key])
                             self.set(key.upper(), value)
@@ -96,8 +99,7 @@ class Config(object):
                                     value = bool(value)
                                 elif key.upper() == "PUBLIC_DIR" or key.upper() \
                                         == "CGI_DIR":
-                                    print(os.path.isabs(str(value)))
-                                    print(value)
+                                   value = self._abs_dir(value)
                                 self.set(pair[0].upper(), value)
                             except ValueError:
                                 raise
@@ -109,6 +111,13 @@ class Config(object):
             # Should create a new config file
             print("* Missing configuration file")
             print("* Assuming default settings")
+
+    def _abs_dir(self, value):
+        if not os.path.isabs(value):
+            value = os.path.join(file_dir, value)
+        if not os.path.isdir(value):
+            raise NotADirectoryError("Please enter a valid directory name in your config file")
+        return value
 
 def test():
     """Creates a config object and prints the default settings"""
