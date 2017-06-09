@@ -15,6 +15,9 @@ else:
 
 __all__ = ["Config"]
 
+# XXX: www and cgi folder should be relative to this file - not the best solution
+file_dir = os.path.dirname(__file__)
+
 class Config(object):
     """Configuration helper"""
     def __init__(self):
@@ -41,8 +44,8 @@ class Config(object):
         self.set('REQ_BUFFSIZE', 4096)
         self.set('MAX_URL', 1024)
         self.set('HTTP_VERSION', 1.0)
-        self.set('PUBLIC_DIR', 'www')
-        self.set('CGI_DIR', 'www/cgi-bin')
+        self.set('PUBLIC_DIR', os.path.join(file_dir, 'www'))
+        self.set('CGI_DIR', os.path.join(file_dir, 'www/cgi-bin'))
         self.set('INDEX_FILES', ['index.html', 'index.htm'])
         # NOTE: The following are currently unused
         self.set('LOGGING', True)
@@ -91,6 +94,10 @@ class Config(object):
                                     value = value.split()
                                 elif key.upper() == "LOGGING":
                                     value = bool(value)
+                                elif key.upper() == "PUBLIC_DIR" or key.upper() \
+                                        == "CGI_DIR":
+                                    print(os.path.isabs(str(value)))
+                                    print(value)
                                 self.set(pair[0].upper(), value)
                             except ValueError:
                                 raise

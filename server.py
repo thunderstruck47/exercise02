@@ -521,7 +521,10 @@ class HttpHandler():
                 self.server.stats.add_success(self.addr)
         # XXX: OSError, etc.?
         except IOError as e:
-            self.send_error(500)
+            if e.errno == errno.EACCES:
+                self.send_error(403)
+            else:
+                self.send_error(500)
 
     def add_response(self, code, message=None):
         """writes response status code and default headers"""
@@ -899,9 +902,9 @@ class AsyncServer(StreamServer):
             self.stats.print_stats()
 
 def test():
-    server = ForkingServer()
+    #server = ForkingServer()
     #server = NonBlockingServer()
-    #server = AsyncServer()
+    server = AsyncServer()
     server.serve_persistent()
 
 if __name__ == "__main__":
