@@ -11,6 +11,7 @@ __all__ = ["HttpHandler", "ForkingServer", "NonBlockingServer"]
 
 # Standard modules
 import socket
+import html
 import os
 import subprocess
 import signal
@@ -25,6 +26,7 @@ import time
 from gevent.server import StreamServer
 import config
 import stats
+import urllib
 
 # Import correct config parser and queue
 if sys.version_info > (3, 0):
@@ -413,7 +415,8 @@ class HttpHandler():
                     path = index
                     break
             else:
-                self.send_error(403)
+                #self.send_error(403)
+                self.list_directory(path)
                 return False
         # File?
         if os.path.isfile(path):
@@ -602,7 +605,7 @@ class HttpHandler():
         env["CONTENT_TYPE"] = self._content_type
 
         try:
-            process = subprocess.Popen(["./" + path], stdin=subprocess.PIPE,\
+            process = subprocess.Popen([path], stdin=subprocess.PIPE,\
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env)
             if self._body: stdin = self._body
             else: stdin = b''
@@ -643,6 +646,63 @@ class HttpHandler():
                 return magic.from_file(filepath, mime=True)
             except Exception: # If magic was not imported
                 return self.extensions_map[""]
+
+    def list_directory(self, path):
+        """Helper to produce a directory listing (absent index file).
+        """
+        # XXX: Needs readjustments. Adapted from http.server 
+        try:
+            list = os.listdir(path)
+        except OSError:
+            self.send_error(403)
+            return None
+        list.sort(key=lambda a: a.lower())
+        r = []
+        try:
+            displaypath = urllib.parse.unquote(self._path,
+                                               errors='surrogatepass')
+        except UnicodeDecodeError:
+            displaypath = urllib.parse.unquote(path)
+        displaypath = html.escape(displaypath, quote=False)
+        enc = sys.getfilesystemencoding()
+        title = 'Directory listing for %s' % displaypath
+        r.append('<!DOCTYPE html>')
+        r.append('<html>\n<head>')
+        r.append('<meta http-equiv="Content-Type" '
+                 'content="text/html; charset=%s">' % enc)
+        r.append('<title>%s</title>\n</head>' % title)
+        r.append('<body>\n<h1>%s</h1>' % title)
+        r.append('<hr>\n<ul>')
+        r.append('<li><a href="../">..</a></li>')
+        for name in list:
+            if name.startswith('.'):
+                continue
+            fullname = os.path.join(path, name)
+            displayname = linkname = name
+            # Append / for directories or @ for symbolic links
+            if os.path.isdir(fullname):
+                displayname = name + "/"
+                linkname = name + "/"
+            if os.path.islink(fullname):
+                displayname = name + "@"
+                # Note: a link to a directory displays with @ and links with /
+            r.append('<li><a href="%s">%s</a></li>'
+                    % (urllib.parse.quote(linkname,
+                                          errors='surrogatepass'),
+                       html.escape(displayname, quote=False)))
+        r.append('</ul>\n<hr>\n')
+        r.append(self.server_string() + '\n')
+        r.append('</body>\n</html>\n')
+        encoded = '\n'.join(r).encode(enc, 'surrogateescape')
+        #f = io.BytesIO()
+        #f.write(encoded)
+        #f.seek(0)
+        self.add_response(200)
+        self.add_header("Content-type", "text/html; charset=%s" % enc)
+        self.add_header("Content-Length", str(len(encoded)))
+        self.add_end_header()
+        self._response += encoded
+        self.queue_response()
 
 class BaseServer(object):
 

@@ -23,6 +23,7 @@ python server.py
 * Handles persistent, non persistent and single connections
 * Handles concurrency via forking, non-blocking IO and asynchronously
 * Serves static files of various MIME types
+* Shows directory listing on directories without default Index files
 * Basic CGI script handling (scripts must set "content-length" and "content-type")
 
 ### Configuration
