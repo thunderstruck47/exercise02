@@ -1,11 +1,11 @@
 #!/usr/bin/env python
+from __future__ import print_function
 """\
 TODO: About
 """
 
-__servername__ = "bistro"
-
-__version__ = "0.0.2"
+NAME = "bistro"
+VERSION = "0.0.2"
 
 __all__ = ["HttpHandler", "ForkingServer", "NonBlockingServer"]
 
@@ -120,7 +120,11 @@ class HttpHandler():
         })
 
     def __init__(self, conn=None, addr=None, server=None, cfg=None):
-        """conn stands for connection"""
+        """HTTP Handler class"""
+        if not isinstance(conn, socket.SocketType): raise TypeError('conn parameter ' +
+                'should be a socket instance')
+        if not isinstance(cfg, config.Config): raise TypeError('cfg parameter ' +
+                'should be a Config instance')
         self.total_responses = 0
         self._input_buffer = b''
         self._status_line = ''
@@ -137,27 +141,17 @@ class HttpHandler():
         self.close = True
         self.finished = False
         self.response_queue = queue.Queue()
-        if conn:
-            self.conn = conn
-            if addr:
-                self.addr = addr
-            else:
-                self.addr = conn.getpeername()
-        if server:
-            self.server = server
-        if cfg:
-            self.cfg = cfg
-        else:
+        self.conn = conn or None
+        self.addr = addr or None
+        self.server = server or None
+        self.cfg = cfg or None
+        if not self.cfg:
             self.cfg = config.Config()
             self.cfg.defaults()
         if self.cfg.get('HTTP_VERSION') == 1.1: self.version = 'HTTP/1.1'
         elif self.cfg.get('HTTP_VERSION') == 1.0: self.version = 'HTTP/1.0'
         self._version = self.version
-        # Create current reques variables
-        self.refresh()
-        # Create input buffer
-        self.reset_buffer()
-
+ 
     def finish(self):
         self.finished = True
         self._stage = self.STAGE1
@@ -566,7 +560,7 @@ class HttpHandler():
 
     def server_string(self):
         """returns server name and version"""
-        return __servername__ + '/' + __version__
+        return NAME + '/' + VERSION
 
     def date_time_string(self):
         """returns current date time"""
@@ -590,8 +584,8 @@ class HttpHandler():
         """Prepares the environment and executes the CGI script defined by the path"""
         if not path: path = self._path
         env = {}
-        env["SERVER_NAME"] = __servername__
-        env["SERVER_SOFTWARE"] = __version__
+        env["SERVER_NAME"] = NAME
+        env["SERVER_SOFTWARE"] = VERSION
         env["GATEWAY_INTERFACE"] = "CGI/1.1"
         env["SERVER_PROTOCOL"] = self.version
         env["SERVER_PORT"] = str(self.cfg.get('PORT'))
