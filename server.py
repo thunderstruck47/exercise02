@@ -27,6 +27,7 @@ from gevent.server import StreamServer
 import config
 import stats
 import urllib
+from interface import Stats
 
 # Import correct config parser and queue
 if sys.version_info > (3, 0):
@@ -121,11 +122,10 @@ class HttpHandler():
 
     def __init__(self, conn=None, addr=None, server=None, cfg=None):
         """HTTP Handler class"""
-        if not isinstance(conn, socket.SocketType): raise TypeError('conn parameter ' +
-                'should be a socket instance')
+        #if not isinstance(conn, socket.SocketType): raise TypeError('conn parameter ' +
+        #        'should be a socket instance')
         if not isinstance(cfg, config.Config): raise TypeError('cfg parameter ' +
                 'should be a Config instance')
-        self.total_responses = 0
         self._input_buffer = b''
         self._status_line = ''
         self._headers = []
@@ -148,27 +148,34 @@ class HttpHandler():
         if not self.cfg:
             self.cfg = config.Config()
             self.cfg.defaults()
-        if self.cfg.get('HTTP_VERSION') == 1.1: self.version = 'HTTP/1.1'
-        elif self.cfg.get('HTTP_VERSION') == 1.0: self.version = 'HTTP/1.0'
+        if self.cfg.get('HTTP_VERSION') == 1.1: 
+            self.version = 'HTTP/1.1'
+        elif self.cfg.get('HTTP_VERSION') == 1.0: 
+            self.version = 'HTTP/1.0'
+        else:
+            self.version = 'HTTP/1.0'
         self._version = self.version
  
     def finish(self):
         self.finished = True
         self._stage = self.STAGE1
-        #self.total_responses += 1
 
     def handle_loop(self):
-        self.server.stats.add_handler(self.addr, time.time())
+        #self.server.stats.add_handler(self.addr, time.time())
+        Stats.register(self.addr, time.time())
         while True:
-            if not self.handle(): 
-                self.server.stats.close(self.addr, time.time())
+            if not self.handle():
+                Stats.set_time(self.addr, 't_close', time.time())
+                #self.server.stats.close(self.addr, time.time())
                 return
             if self.finished:
+                #Stats.set_count(self.addr, 'success', '+')
                 #self.server.stats
                 #self.server.count_requests += 1
                 self.send()
                 if self.close:
-                    self.server.stats.close(self.addr)
+                    Stats.set_time(self.addr, 't_close', time.time())
+                    #self.server.stats.close(self.addr)
                     return
 
     #@profile
@@ -180,7 +187,6 @@ class HttpHandler():
             self.finish()
             # XXX: this closes the connection and does not produce a response
             # There should be a better way to account for this
-            #self.total_responses -= 1
             return False
         # Check stage
         if self._stage == self.STAGE1:
@@ -250,6 +256,7 @@ class HttpHandler():
     def recv(self):
         """returns void"""
         # Read until the socket blocks
+        # XXX: Better use file handlers
         #if __debug__: print("Receiving..")
         while True:
             try:
@@ -301,7 +308,8 @@ class HttpHandler():
             self._status_line, self._input_buffer = \
                     self._input_buffer.split(self._lt.encode('utf-8'), 1)
             self._status_line = self._status_line.decode('utf-8')
-            self.server.stats.add_received(self.addr)
+            #self.server.stats.add_received(self.addr)
+            Stats.set_count(self.addr, 'recv', '+')
             return True
         except ValueError:
             if len(self._input_buffer) > self.cfg.get('MAX_URL'):
@@ -490,7 +498,8 @@ class HttpHandler():
         self.add_end_header()
         self._response += content
         self.queue_response()
-        self.server.stats.add_error(self.addr)
+        #self.server.stats.add_error(self.addr)
+        Stats.set_count(self.addr, 'error', '+')
         # TODO: Add message boyd
 
     def queue_response(self):
@@ -515,7 +524,8 @@ class HttpHandler():
                 if self._method != 'HEAD': self._response += f.read()
                 self.queue_response()
                 # NOTE: stats
-                self.server.stats.add_success(self.addr)
+                #self.server.stats.add_success(self.addr)
+                Stats.set_count(self.addr, 'success', '+')
         # XXX: OSError, etc.?
         except IOError as e:
             if e.errno == errno.EACCES:
@@ -612,7 +622,8 @@ class HttpHandler():
             self.add_response(200)
             self._response += output
             self.queue_response()
-            self.server.stats.add_success(self.addr)
+            #self.server.stats.add_success(self.addr)
+            Stats.set_count(self.addr, 'success', '+')
         except Exception:
             raise
             self.send_error(500)

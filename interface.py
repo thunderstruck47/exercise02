@@ -20,6 +20,15 @@ class Stats(object):
     _c = 'statistics'
 
     @classmethod
+    def register(self, addr, timestamp=None):
+        """Publishes a message to register the issuer"""
+        if not timestamp:
+            timestamp = time.time()
+        else: 
+            assert isinstance(timestamp, float), 'parameter :time must be float'
+        self._publish(addr, 'register', timestamp)
+
+    @classmethod
     def set_count(self, addr, op, value=1):
         """Publishes a message containg issuers' address, increase operation and value.
 :addr -> string1
@@ -34,17 +43,17 @@ class Stats(object):
         self._publish(addr, op, value)
 
     @classmethod
-    def set_time(self, addr, op, time=None):
+    def set_time(self, addr, op, timestamp=None):
         """Publishes a message containg issuers' address, time operation and timestamp.
 :addr -> string1
-:op -> string, either 'recv', 'success' or 'error'
+:op -> string, either 't_open' or 't_close'
 :time -> float, should be time.time()
 """
         ops = ['t_open','t_close']
         if op not in ops: raise ValueError('Invalid value for parameter :op')
-        if not time: time = time.time()
-        else: assert isinstance(time, float), 'parameter :time must be float'
-        self._publish(addr, op, time)
+        if not timestamp: timestamp = time.time()
+        else: assert isinstance(timestamp, float), 'parameter :time must be float'
+        self._publish(addr, op, timestamp)
 
     @classmethod
     def _publish(self, addr, op, value):

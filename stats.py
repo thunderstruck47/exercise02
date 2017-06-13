@@ -36,6 +36,8 @@ Timestamp should be in UTC"""
         # TODO: Should be able to cound statistics for N times that host was connected
         if not timestamp:
             timestamp = time.time()
+        else:
+            timestamp = float(timestamp)
         if address in self._statistics:
             self._statistics[address]['times_connected'] += 1
         else:
@@ -71,6 +73,8 @@ Can also retrieve a single stat if parameter stat was set"""
 Timestamp should be in UTC"""
         if not timestamp:
             timestamp = time.time()
+        else:
+            timestamp = float(timestamp)
         self._statistics[address]['t_closed'] = timestamp
 
     def open(self, address, timestamp=None):
@@ -78,6 +82,8 @@ Timestamp should be in UTC"""
 Timestamp should be in UTC"""
         if not timestamp:
             timestamp = time.time()
+        else:
+            timestamp = float(timestamp)
         self._statistics[address]['t_opened'] = timestamp
 
     def get_all_dtime(self):
