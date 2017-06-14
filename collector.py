@@ -1,4 +1,5 @@
 from redis import Redis
+from redis.exceptions import ConnectionError
 from stats import Store
 from threading import Thread
 import sys
@@ -23,22 +24,27 @@ class Collector(Thread):
 
     def work(self, item):
         data = item['data'].decode()
-        # XXX: Address formated as ('x.x.x.x', p), thus we split from right
+        # XXX: Needs message validation!
         data = data.rsplit(' ', 2)
         params = dict(zip(['addr','op','data'], data))
-        print(params)
-        # WARNING: everything below can fail
-        # XXX: NEEDS ERROR HANDLING AND VALIDATION
+        print(params) # Prits out the received message
         # Choose operation (similar to C switch statement)
+        # Default is None
         op = {
             'register': self.stats.add_handler,
             'recv': self.stats.add_received,
             'success': self.stats.add_success,
             'error': self.stats.add_error,
             't_close': self.stats.close,
-            't_open': self.stats.open }[params['op']]
+            't_open': self.stats.open }.get(params['op'], None)
         # Execute operation with given parameters
-        op(params['addr'], params['data'])
+        if op:
+            try:
+                op(params['addr'], params['data'])
+            except (KeyError, ValueError):
+                print("Invalid data")
+        else:
+            print("Invalid operation")
 
     def run(self):
         for item in self.pubsub.listen():
@@ -51,7 +57,11 @@ class Collector(Thread):
                 self.work(item)
 
 if __name__ == '__main__':
-    r = Redis()
-    c = Collector(r,['statistics'])
-    c.start()
-    c.shell()
+    try:
+        r = Redis()
+        c = Collector(r,['statistics'])
+        c.start()
+        c.shell()
+    except ConnectionError:
+        print("Could not connect to redis. Redis needs to be started before collector")
+    
