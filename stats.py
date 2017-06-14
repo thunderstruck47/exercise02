@@ -126,6 +126,8 @@ Timestamp should be in UTC"""
             
 
     def print_stats(self):
+        # XXX: This method yields errors when data is not collected as expected
+        # TODO: Better way to gather statistics and interface with the shell
         # Arrays
         d_times = self.get_all_dtime()
         o_times = self.get_all_open()

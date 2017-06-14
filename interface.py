@@ -18,6 +18,8 @@ class Stats(object):
         print("Warning: Could not connect to redis server! Run setup() to configure")
     # Default channel:
     _c = 'statistics'
+    # XXX: This class reuses assert isinstance checks - there should be a better
+    # way to error handling!
 
     @classmethod
     def register(self, addr, timestamp=None):
