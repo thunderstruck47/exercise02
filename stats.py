@@ -7,6 +7,11 @@ CHANNEL = 'test'
 
 import time
 import numpy
+from pickle import dump
+from os.path import isfile
+from sys import version
+if int(version[0]) == 2:
+    input = raw_input
 try:
     import redis
 except ModuleNotFoundError:
@@ -85,6 +90,14 @@ Timestamp should be in UTC"""
         else:
             timestamp = float(timestamp)
         self._statistics[address]['t_opened'] = timestamp
+    
+    def save(self, filename=None):
+        if isfile(filename):
+            ans = input("File with name '{}' already exists. Override? (Y/n): ".format(filename))
+            if ans.upper() != 'Y':
+                return
+        fh = open(filename, 'wb')
+        dump(self, fh)
 
     def get_all_dtime(self):
         times = []

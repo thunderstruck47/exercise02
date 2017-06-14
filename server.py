@@ -162,10 +162,10 @@ class HttpHandler():
 
     def handle_loop(self):
         #self.server.stats.add_handler(self.addr, time.time())
-        Stats.register(self.addr, time.time())
+        if __debug__: Stats.register(self.addr, time.time())
         while True:
             if not self.handle():
-                Stats.set_time(self.addr, 't_close', time.time())
+                if __debug__: Stats.set_time(self.addr, 't_close', time.time())
                 #self.server.stats.close(self.addr, time.time())
                 return
             if self.finished:
@@ -174,7 +174,7 @@ class HttpHandler():
                 #self.server.count_requests += 1
                 self.send()
                 if self.close:
-                    Stats.set_time(self.addr, 't_close', time.time())
+                    if __debug__: Stats.set_time(self.addr, 't_close', time.time())
                     #self.server.stats.close(self.addr)
                     return
 
@@ -309,7 +309,7 @@ class HttpHandler():
                     self._input_buffer.split(self._lt.encode('utf-8'), 1)
             self._status_line = self._status_line.decode('utf-8')
             #self.server.stats.add_received(self.addr)
-            Stats.set_count(self.addr, 'recv', '+')
+            if __debug__: Stats.set_count(self.addr, 'recv', '+')
             return True
         except ValueError:
             if len(self._input_buffer) > self.cfg.get('MAX_URL'):
@@ -499,7 +499,7 @@ class HttpHandler():
         self._response += content
         self.queue_response()
         #self.server.stats.add_error(self.addr)
-        Stats.set_count(self.addr, 'error', '+')
+        if __debug__: Stats.set_count(self.addr, 'error', '+')
         # TODO: Add message boyd
 
     def queue_response(self):
@@ -525,7 +525,7 @@ class HttpHandler():
                 self.queue_response()
                 # NOTE: stats
                 #self.server.stats.add_success(self.addr)
-                Stats.set_count(self.addr, 'success', '+')
+                if __debug__: Stats.set_count(self.addr, 'success', '+')
         # XXX: OSError, etc.?
         except IOError as e:
             if e.errno == errno.EACCES:
@@ -623,7 +623,7 @@ class HttpHandler():
             self._response += output
             self.queue_response()
             #self.server.stats.add_success(self.addr)
-            Stats.set_count(self.addr, 'success', '+')
+            if __debug__: Stats.set_count(self.addr, 'success', '+')
         except Exception:
             raise
             self.send_error(500)
@@ -825,7 +825,7 @@ class ForkingServer(BaseServer):
                     self.handler.send()
                     if self.handler.close:
                         self.conn.close()
-                        Stats.set_time(self.handler.addr, 't_close', time.time())
+                        if __debug__: Stats.set_time(self.handler.addr, 't_close', time.time())
                         #self.stats.close(self.handler.addr)
                         self.connected = False
                         del self.handler
@@ -853,7 +853,7 @@ class ForkingServer(BaseServer):
                             self.socket.close()
                             self.handler = HttpHandler(self.conn, self.addr, self)
                             #self.stats.add_handler(self.addr)
-                            Stats.register(self.addr)
+                            if __debug__: Stats.register(self.addr)
                             self.connected = True
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
@@ -907,7 +907,7 @@ class NonBlockingServer(BaseServer):
                         self.inputs.append(conn)
                         self.handlers[conn] = HttpHandler(conn, addr, self)
                         #self.stats.add_handler(addr, time.time())
-                        Stats.register(addr, time.time())
+                        if __debug__: Stats.register(addr, time.time())
                     else:
                         handler = self.handlers[s]
                         handler.handle()
@@ -918,7 +918,7 @@ class NonBlockingServer(BaseServer):
                                     handler.close:
                                 self.clear(s)
                                 #self.stats.close(handler.addr, time.time())
-                                Stats.set_time(handler.addr, 't_close',time.time())
+                                if __debug__: Stats.set_time(handler.addr, 't_close',time.time())
                                 if s in w: w.remove(s)
                 # Handle outputs
                 for s in w:
@@ -928,7 +928,7 @@ class NonBlockingServer(BaseServer):
                         self.outputs.remove(s)
                         if handler.finished and handler.close:
                             #self.stats.close(handler.addr, time.time())
-                            Stats.set_time(handler.addr, 't_close', time.time())
+                            if __debug__: Stats.set_time(handler.addr, 't_close', time.time())
                             self.clear(s)
                 # Handle "exceptional conditions"
                 for s in e:
