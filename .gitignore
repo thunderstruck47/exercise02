@@ -19,3 +19,4 @@ tests/siege
 tests/a.sh
 tests/data/
 tests/plots/
+stats/
