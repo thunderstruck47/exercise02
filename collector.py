@@ -21,13 +21,15 @@ class Collector(Thread):
                     self.stats.print_stats()
                 except ValueError:
                     print("Not enough data")
+            elif line == 'reset':
+                self.stats.reset()
 
     def work(self, item):
         data = item['data'].decode()
         # XXX: Needs message validation!
         data = data.rsplit(' ', 2)
         params = dict(zip(['addr','op','data'], data))
-        print(params) # Prits out the received message
+        #print(params) # Prits out the received message
         # Choose operation (similar to C switch statement)
         # Default is None
         op = {

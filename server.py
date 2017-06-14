@@ -124,8 +124,8 @@ class HttpHandler():
         """HTTP Handler class"""
         #if not isinstance(conn, socket.SocketType): raise TypeError('conn parameter ' +
         #        'should be a socket instance')
-        if not isinstance(cfg, config.Config): raise TypeError('cfg parameter ' +
-                'should be a Config instance')
+        #if not isinstance(cfg, config.Config): raise TypeError('cfg parameter ' +
+        #        'should be a Config instance')
         self._input_buffer = b''
         self._status_line = ''
         self._headers = []
@@ -825,7 +825,8 @@ class ForkingServer(BaseServer):
                     self.handler.send()
                     if self.handler.close:
                         self.conn.close()
-                        self.stats.close(self.handler.addr)
+                        Stats.set_time(self.handler.addr, 't_close', time.time())
+                        #self.stats.close(self.handler.addr)
                         self.connected = False
                         del self.handler
                         os._exit(0)
@@ -851,12 +852,13 @@ class ForkingServer(BaseServer):
                         else:
                             self.socket.close()
                             self.handler = HttpHandler(self.conn, self.addr, self)
-                            self.stats.add_handler(self.addr)
+                            #self.stats.add_handler(self.addr)
+                            Stats.register(self.addr)
                             self.connected = True
         except KeyboardInterrupt:
             if self.conn: self.conn.close()
             self.socket.close()
-            self.stats.print_stats()
+            #self.stats.print_stats()
             # TODO: Needs error handling
             #print("Total {}".format(str(self.stats.get_total())))
             #print("Times standard deviation: {}".format(self.stats.get_time_sd()))
@@ -904,7 +906,8 @@ class NonBlockingServer(BaseServer):
                         conn.setblocking(False)
                         self.inputs.append(conn)
                         self.handlers[conn] = HttpHandler(conn, addr, self)
-                        self.stats.add_handler(addr, time.time())
+                        #self.stats.add_handler(addr, time.time())
+                        Stats.register(addr, time.time())
                     else:
                         handler = self.handlers[s]
                         handler.handle()
@@ -914,7 +917,8 @@ class NonBlockingServer(BaseServer):
                             if handler.response_queue.qsize() == 0 and \
                                     handler.close:
                                 self.clear(s)
-                                self.stats.close(handler.addr, time.time())
+                                #self.stats.close(handler.addr, time.time())
+                                Stats.set_time(handler.addr, 't_close',time.time())
                                 if s in w: w.remove(s)
                 # Handle outputs
                 for s in w:
@@ -923,13 +927,14 @@ class NonBlockingServer(BaseServer):
                         # XXX: ?
                         self.outputs.remove(s)
                         if handler.finished and handler.close:
-                            self.stats.close(handler.addr, time.time())
+                            #self.stats.close(handler.addr, time.time())
+                            Stats.set_time(handler.addr, 't_close', time.time())
                             self.clear(s)
                 # Handle "exceptional conditions"
                 for s in e:
                     self.clear(s)
         except KeyboardInterrupt:
-            self.stats.print_stats()
+            #self.stats.print_stats()
             self.clear(self.socket)
 
     def clear(self, connection):
@@ -967,7 +972,8 @@ class AsyncServer(StreamServer):
         try:
             self.serve_forever()
         except KeyboardInterrupt:
-            self.stats.print_stats()
+            pass
+            #self.stats.print_stats()
 
 def test():
     #server = ForkingServer()
