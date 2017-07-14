@@ -976,9 +976,9 @@ class AsyncServer(StreamServer):
             #self.stats.print_stats()
 
 def test():
-    #server = ForkingServer()
+    server = ForkingServer()
     #server = NonBlockingServer()
-    server = AsyncServer('server.conf')
+    #server = AsyncServer('server.conf')
     server.serve_persistent()
 
 if __name__ == "__main__":

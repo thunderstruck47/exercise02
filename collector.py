@@ -19,26 +19,29 @@ class Collector(Thread):
     def shell(self):
         help_str = """\
 This shell accepts the following commands:
-    help            - display this message
+    help, ?         - display this message
     print           - get current statistics
     total           - get total statistics
-    save <filename> - save Store object to file\
+    save <filename> - save Store object to file
+    load <filename> - loads Store object from file
+    reset, clear    - clears current Store object
+    exit, quit      - quit the interactive shell\
 """
         while True:
             sys.stdout.write('>> ')
             sys.stdout.flush()
             line = sys.stdin.readline()
             line = line.strip()
-            if line.upper() == 'EXIT':
+            if line.upper() in ['EXIT', 'QUIT']:
                 sys.exit()
-            elif line.upper() == 'HELP':
+            elif line.upper() in ['HELP','?']:
                 print(help_str)
             elif line.upper() == 'PRINT':
                 try:
                     self.stats.print_stats()
                 except ValueError:
                     print("Not enough data")
-            elif line.upper() == 'RESET':
+            elif line.upper() in ['RESET', 'CLEAR']:
                 self.stats.reset()
             elif line.upper() == 'TOTAL':
                 print(self.stats.get_total())
